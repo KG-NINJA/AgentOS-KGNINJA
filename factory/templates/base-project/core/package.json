@@ -1,0 +1,12 @@
+{
+  "name": "factory-fallback-web-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline-safe fallback scaffold for Factory web_app generation",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node -e \"process.exit(0)\""
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

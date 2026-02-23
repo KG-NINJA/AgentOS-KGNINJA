@@ -1,0 +1,6 @@
+{"phase":"GENERATOR","exit_code":2,"category":"SYNTAX_ERROR","confidence":0.7143,"signals":{"signature_matches":["unexpected EOF"],"exit_code_match":true,"rule_weight":3,"total_weight":3}}
+{"phase":"GENERATOR","exit_code":127,"category":"DEPENDENCY_ERROR","confidence":0.7143,"signals":{"signature_matches":["command not found"],"exit_code_match":true,"rule_weight":3,"total_weight":3}}
+{"phase":"DECISION","exit_code":1,"category":"HARD_POLICY_BLOCK","confidence":0.5556,"signals":{"signature_matches":["\\[POLICY_BLOCK\\]","HARD_POLICY_BLOCK_SIGNATURE"],"exit_code_match":true,"rule_weight":4,"total_weight":4}}
+{"phase":"GENERATOR","exit_code":124,"category":"TIMEOUT","confidence":1.0000,"signals":{"signature_matches":["timed out"],"exit_code_match":true,"rule_weight":2,"total_weight":2}}
+{"phase":"BRAIN","exit_code":1,"category":"UNKNOWN_NONZERO","confidence":0.3333,"signals":{"signature_matches":[],"exit_code_match":true,"rule_weight":1,"total_weight":1}}
+{"phase":"POST_GATE","exit_code":0,"category":"SUCCESS","confidence":1.0000,"signals":{"signature_matches":[],"exit_code_match":true,"rule_weight":1,"total_weight":1}}

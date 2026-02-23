@@ -1,0 +1,53 @@
+{
+  "num_runs": 5,
+  "workspace_cleanup": true,
+  "debug": true,
+  "output_dir": "evolution_eval/output",
+  "execution_command": "./factory.sh run",
+  "decision_limit_override": 1000000,
+  "failure_definition": {
+    "failure_prefixes": [
+      "POST_GATE_REJECT",
+      "HARD_POLICY_BLOCK"
+    ],
+    "exclude": [
+      "DECISION_LIMIT"
+    ],
+    "decision_limit_reason_code": "DECISION_LIMIT_EXCLUDED"
+  },
+  "failure_injection": {
+    "enabled": true,
+    "mode": "dependency_error",
+    "rate": 0.4,
+    "seed": 20260216,
+    "baseline_enabled": true,
+    "kernel_enabled": false
+  },
+  "max_runs": 100,
+  "batch_size": 5,
+  "max_batches": 3,
+  "max_duration_seconds": 3600,
+  "stability_threshold": 0.9,
+  "no_improvement_patience": 3,
+  "quality_gate_relaxation_factor": 1.0,
+  "preflight": {
+    "enabled": true,
+    "runs": 3,
+    "dependency_error_stop_threshold": 2
+  },
+  "validity": {
+    "require_mixed_rates": true,
+    "dependency_error_ratio_max": 0.2,
+    "min_batches_with_positive_improvement": 2
+  },
+  "logs": {
+    "baseline": "baseline_runs.jsonl",
+    "kernel": "kernel_runs.jsonl",
+    "analysis": "analysis_summary.json",
+    "analysis_extended": "analysis_extended.json",
+    "safety_state": "safety_state.json",
+    "batch_log": "safe_batches.log",
+    "preflight_log": "preflight.log",
+    "validity_log": "validity.log"
+  }
+}

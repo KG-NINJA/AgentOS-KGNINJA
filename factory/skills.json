@@ -1,0 +1,24 @@
+{
+  "skills": [
+    {
+      "match": [
+        "web_app"
+      ],
+      "script": "./factory/generator/codex_generate.sh"
+    },
+    {
+      "match": [
+        "desktop_app",
+        "screen_change_monitoring",
+        "desktop_gui"
+      ],
+      "script": "./factory/generator/codex_generate.sh"
+    },
+    {
+      "match": [
+        "default"
+      ],
+      "script": "./factory/generator/create_project.sh"
+    }
+  ]
+}

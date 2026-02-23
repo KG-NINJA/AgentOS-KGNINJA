@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "factory_diagnostics.schema.json",
+  "title": "Factory Diagnostics Summary",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "total_runs",
+    "classification_counts",
+    "classification_percentages",
+    "most_frequent_classification",
+    "reason_code_distribution",
+    "example_stderr_by_classification",
+    "pattern_counts",
+    "suggested_causes",
+    "suggested_remediations",
+    "runs"
+  ],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "generated_at": { "type": "string" },
+    "schema_path": { "type": "string" },
+    "total_runs": { "type": "integer", "minimum": 0 },
+    "classification_counts": {
+      "type": "object",
+      "required": [
+        "REAL_FAILURE",
+        "DECISION_LIMIT",
+        "REFLEX/QUALITY_GATE_BLOCK",
+        "UNKNOWN_ERROR"
+      ],
+      "properties": {
+        "REAL_FAILURE": { "type": "integer", "minimum": 0 },
+        "DECISION_LIMIT": { "type": "integer", "minimum": 0 },
+        "REFLEX/QUALITY_GATE_BLOCK": { "type": "integer", "minimum": 0 },
+        "UNKNOWN_ERROR": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "classification_percentages": {
+      "type": "object",
+      "required": [
+        "REAL_FAILURE",
+        "DECISION_LIMIT",
+        "REFLEX/QUALITY_GATE_BLOCK",
+        "UNKNOWN_ERROR"
+      ],
+      "properties": {
+        "REAL_FAILURE": { "type": "number", "minimum": 0 },
+        "DECISION_LIMIT": { "type": "number", "minimum": 0 },
+        "REFLEX/QUALITY_GATE_BLOCK": { "type": "number", "minimum": 0 },
+        "UNKNOWN_ERROR": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "most_frequent_classification": {
+      "type": "string",
+      "enum": [
+        "REAL_FAILURE",
+        "DECISION_LIMIT",
+        "REFLEX/QUALITY_GATE_BLOCK",
+        "UNKNOWN_ERROR"
+      ]
+    },
+    "reason_code_distribution": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "example_stderr_by_classification": {
+      "type": "object",
+      "required": [
+        "REAL_FAILURE",
+        "DECISION_LIMIT",
+        "REFLEX/QUALITY_GATE_BLOCK",
+        "UNKNOWN_ERROR"
+      ],
+      "properties": {
+        "REAL_FAILURE": { "type": "string" },
+        "DECISION_LIMIT": { "type": "string" },
+        "REFLEX/QUALITY_GATE_BLOCK": { "type": "string" },
+        "UNKNOWN_ERROR": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "pattern_counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "suggested_causes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "suggested_remediations": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "exit_status",
+          "classification",
+          "reason_code",
+          "stdout_path",
+          "stderr_path",
+          "index_tail_path",
+          "activity_tail_path"
+        ],
+        "properties": {
+          "run_id": { "type": "string" },
+          "exit_status": { "type": "integer" },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "REAL_FAILURE",
+              "DECISION_LIMIT",
+              "REFLEX/QUALITY_GATE_BLOCK",
+              "UNKNOWN_ERROR"
+            ]
+          },
+          "reason_code": { "type": "string" },
+          "stdout_path": { "type": "string" },
+          "stderr_path": { "type": "string" },
+          "index_tail_path": { "type": "string" },
+          "activity_tail_path": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

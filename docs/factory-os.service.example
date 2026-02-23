@@ -1,0 +1,16 @@
+[Unit]
+Description=Factory OS Queue Worker (lease -> run_job)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/user/kg-autonomous
+Environment=MAX_FIX=3
+Environment=APPROVAL_POLICY=untrusted
+Environment=SANDBOX_MODE=workspace-write
+ExecStart=/home/user/kg-autonomous/factory/os/watch_queue.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

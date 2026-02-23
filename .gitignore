@@ -1,0 +1,52 @@
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Python cache and virtualenvs
+.venv/
+**/__pycache__/
+*.pyc
+
+# Node dependencies
+**/node_modules/
+
+# Runtime and generated state
+runtime/
+workspace/
+repair_queue/
+snapshots/
+cache/
+inbox/
+diagnostics/output/
+diagnostics/failure_signature_summary.json
+diagnostics/root_cause_report.txt
+evolution_eval/output/
+evolution_eval/.venv/
+plan/
+
+# Queue data is local runtime state. Keep only public skeleton + sample.
+queue/**
+!queue/
+!queue/incoming/
+!queue/leased/
+!queue/processing/
+!queue/done/
+!queue/failed/
+!queue/incoming/.gitkeep
+!queue/leased/.gitkeep
+!queue/processing/.gitkeep
+!queue/done/.gitkeep
+!queue/failed/.gitkeep
+!queue/incoming/example_job.md
+
+# Logs, locks, pids, and local env files
+*.log
+*.lock
+*.pid
+.env
+.env.*
+
+# Windows ADS artifacts
+*.md:Zone.Identifier

@@ -1,0 +1,6 @@
+PySide6>=6.7.0
+mss>=9.0.1
+opencv-python>=4.10.0
+scikit-image>=0.24.0
+numpy>=1.26.0
+pytest>=8.0.0

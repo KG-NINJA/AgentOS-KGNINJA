@@ -1,0 +1,406 @@
+{
+  "type": "object",
+  "required": [
+    "project_type",
+    "ai_task",
+    "input_type",
+    "ui_type",
+    "entities"
+  ],
+  "properties": {
+    "project_type": {
+      "type": "string"
+    },
+    "ai_task": {
+      "type": "string"
+    },
+    "input_type": {
+      "type": "string"
+    },
+    "ui_type": {
+      "type": "string"
+    },
+    "entities": {
+      "type": "object",
+      "required": [
+        "noun",
+        "verb",
+        "modifier"
+      ],
+      "properties": {
+        "noun": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verb": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "modifier": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "intent": {
+      "type": "object",
+      "properties": {
+        "app_level": {
+          "type": "string",
+          "enum": [
+            "full_app",
+            "module"
+          ]
+        },
+        "api_required": {
+          "type": "boolean"
+        },
+        "frontend_required": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ui_layout": {
+      "type": "object",
+      "properties": {
+        "controls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "output": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "api_contract": {
+      "type": "object",
+      "required": [
+        "endpoint",
+        "method"
+      ],
+      "properties": {
+        "endpoint": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS",
+            "HEAD"
+          ]
+        },
+        "response": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtime_rules": {
+      "type": "object",
+      "properties": {
+        "stability_priority": {
+          "type": "string",
+          "enum": [
+            "low_ambiguity",
+            "balanced",
+            "creative"
+          ]
+        },
+        "deterministic": {
+          "type": "boolean"
+        },
+        "strict_mode": {
+          "type": "boolean"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 120000
+        },
+        "retry_policy": {
+          "type": "object",
+          "properties": {
+            "max_retries": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8
+            },
+            "backoff_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 60000
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "patternProperties": {
+        "^x_[A-Za-z0-9_]{1,64}$": {}
+      },
+      "additionalProperties": false
+    },
+    "quality_policy": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "quality_first",
+            "speed_first",
+            "balanced"
+          ]
+        },
+        "focus": {
+          "type": "string",
+          "enum": [
+            "visual_first",
+            "simulation_first",
+            "balanced"
+          ]
+        },
+        "simulation_level": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "publish_gate": {
+          "type": "string",
+          "enum": [
+            "strict",
+            "relaxed"
+          ]
+        },
+        "auto_retry_on_fail": {
+          "type": "boolean"
+        },
+        "max_retry_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        }
+      },
+      "additionalProperties": false
+    },
+    "requirements": {
+      "type": "object",
+      "properties": {
+        "use_cases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mvp_features": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "non_functional": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "data_requirements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "interaction_model": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "priority": {
+          "type": "string"
+        },
+        "risk_level": {
+          "type": "string"
+        },
+        "diff_detection": {
+          "type": "object",
+          "properties": {
+            "methods": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "score_formula": {
+              "type": "string"
+            },
+            "noise_filters": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "markdown_output": {
+          "type": "object",
+          "properties": {
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "storage_pattern": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "logging": {
+          "type": "object",
+          "properties": {
+            "file_pattern": {
+              "type": "string"
+            },
+            "asset_dir": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "notifications": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stack": {
+          "type": "object",
+          "properties": {
+            "language": {
+              "type": "string"
+            },
+            "gui": {
+              "type": "string"
+            },
+            "capture": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "ssim": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "directory_structure": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "stack_hints": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "boolean",
+          "integer",
+          "number"
+        ]
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "feature_intents": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "contracts": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "behaviors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "test_rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "validation_plan": {
+      "type": "object",
+      "properties": {
+        "syntax_checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "test_commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "clarify_required": {
+      "type": "boolean"
+    },
+    "ambiguities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

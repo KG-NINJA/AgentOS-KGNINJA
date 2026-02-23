@@ -1,0 +1,8 @@
+{
+  "structured_multi_agent": false,
+  "open_md_pipeline_enabled": false,
+  "open_md_pipeline_shadow_mode": true,
+  "clarify_gate_mode": "warn_continue",
+  "clarify_hybrid_min_confidence": 0.3,
+  "default_artifact_target": "web_app"
+}

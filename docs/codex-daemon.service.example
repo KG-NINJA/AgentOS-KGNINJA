@@ -1,0 +1,15 @@
+[Unit]
+Description=Codex Repair Daemon (app-server backed)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/user/kg-autonomous
+Environment=APPROVAL_POLICY=untrusted
+Environment=SANDBOX_MODE=workspace-write
+ExecStart=/usr/bin/python3 /home/user/kg-autonomous/factory/agent/codex_daemon.py --root /home/user/kg-autonomous --listen stdio://
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

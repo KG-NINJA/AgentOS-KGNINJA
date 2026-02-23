@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Factory Evolution Dashboard</title>
+  <style>
+    :root {
+      --text: #222;
+      --subtext: #666;
+      --positive: #2e7d32;
+      --negative: #c62828;
+      --border: #e0e0e0;
+      --bg: #ffffff;
+      --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.45;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 24px 16px 32px;
+    }
+
+    header {
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--subtext);
+      font-size: 15px;
+    }
+
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      margin-top: 14px;
+      box-shadow: var(--card-shadow);
+      background: #fff;
+      transition: box-shadow 0.16s ease;
+    }
+
+    .panel:hover {
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+    }
+
+    .panel h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .metric {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+    }
+
+    .label {
+      color: var(--subtext);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .value {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .delta-positive { color: var(--positive); }
+    .delta-negative { color: var(--negative); }
+
+    .small-note {
+      margin-top: 8px;
+      color: var(--subtext);
+      font-size: 13px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 8px;
+      margin: 6px 0;
+      font-size: 14px;
+    }
+
+    .row .key {
+      color: var(--subtext);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 10px;
+      border: 1px solid var(--border);
+    }
+
+    th {
+      background: #fafafa;
+      font-weight: 600;
+    }
+
+    .chart-wrap {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+    }
+
+    canvas {
+      width: 100%;
+      height: 220px;
+      display: block;
+    }
+
+    footer {
+      margin-top: 18px;
+      color: var(--subtext);
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .error {
+      color: var(--negative);
+      font-size: 14px;
+      margin-top: 10px;
+    }
+
+    @media (max-width: 720px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+      .row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>Factory Evolution Dashboard</h1>
+      <p class="subtitle">Incremental Self-Improvement Overview</p>
+    </header>
+
+    <section class="panel">
+      <h2>Current Iteration Summary</h2>
+      <div class="grid">
+        <div class="metric">
+          <div class="label">Iteration ID</div>
+          <div class="value" id="iterationId">-</div>
+        </div>
+        <div class="metric">
+          <div class="label">Final Score (Candidate)</div>
+          <div class="value" id="candidateScore">-</div>
+        </div>
+        <div class="metric">
+          <div class="label">Score Delta</div>
+          <div class="value" id="scoreDelta">-</div>
+        </div>
+        <div class="metric">
+          <div class="label">Stability</div>
+          <div class="value" id="stability">-</div>
+        </div>
+        <div class="metric">
+          <div class="label">Confidence Quality</div>
+          <div class="value" id="confidenceQuality">-</div>
+        </div>
+        <div class="metric">
+          <div class="label">Human Score</div>
+          <div class="value" id="humanScore">-</div>
+        </div>
+      </div>
+      <p class="small-note" id="improvementNote">-</p>
+    </section>
+
+    <section class="panel">
+      <h2>Micro Change Explanation</h2>
+      <div class="row"><div class="key">Rule Changed</div><div id="ruleChanged">-</div></div>
+      <div class="row"><div class="key">Delta Applied</div><div id="deltaApplied">-</div></div>
+      <div class="row"><div class="key">Exploration Noise</div><div id="noiseValue">-</div></div>
+      <div class="row"><div class="key">Reason</div><div id="changeReason">-</div></div>
+      <p class="small-note" id="deltaZeroMessage"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Score Comparison</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Baseline</th>
+            <th>Candidate</th>
+            <th>Delta</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td id="tableBaseline">-</td>
+            <td id="tableCandidate">-</td>
+            <td id="tableDelta">-</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>Evolution Timeline</h2>
+      <div class="chart-wrap">
+        <canvas id="timelineChart" width="860" height="220"></canvas>
+      </div>
+      <p class="error" id="timelineError" hidden>Timeline data unavailable.</p>
+    </section>
+
+    <footer>
+      <div>Controlled exploration enabled</div>
+      <div id="currentTimestamp">-</div>
+    </footer>
+
+    <p class="error" id="loadError" hidden>Failed to load local data files.</p>
+  </main>
+
+  <script>
+    const els = {
+      iterationId: document.getElementById('iterationId'),
+      candidateScore: document.getElementById('candidateScore'),
+      scoreDelta: document.getElementById('scoreDelta'),
+      stability: document.getElementById('stability'),
+      confidenceQuality: document.getElementById('confidenceQuality'),
+      humanScore: document.getElementById('humanScore'),
+      improvementNote: document.getElementById('improvementNote'),
+      ruleChanged: document.getElementById('ruleChanged'),
+      deltaApplied: document.getElementById('deltaApplied'),
+      noiseValue: document.getElementById('noiseValue'),
+      changeReason: document.getElementById('changeReason'),
+      deltaZeroMessage: document.getElementById('deltaZeroMessage'),
+      tableBaseline: document.getElementById('tableBaseline'),
+      tableCandidate: document.getElementById('tableCandidate'),
+      tableDelta: document.getElementById('tableDelta'),
+      timelineError: document.getElementById('timelineError'),
+      loadError: document.getElementById('loadError'),
+      currentTimestamp: document.getElementById('currentTimestamp')
+    };
+
+    function asNumber(v, fallback = 0) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    function fmt(v, digits = 1) {
+      return asNumber(v).toFixed(digits);
+    }
+
+    function applyDeltaColor(node, delta) {
+      node.classList.remove('delta-positive', 'delta-negative');
+      if (delta > 0) node.classList.add('delta-positive');
+      if (delta < 0) node.classList.add('delta-negative');
+    }
+
+    function renderSummary(latest) {
+      const iteration = latest?.iteration ?? '-';
+      const baseline = asNumber(latest?.scores?.baseline);
+      const candidate = asNumber(latest?.scores?.candidate);
+      const delta = asNumber(latest?.scores?.delta);
+      const stability = asNumber(latest?.metrics?.stability);
+      const confidenceQuality = asNumber(latest?.metrics?.confidence_quality);
+      const humanScore = asNumber(latest?.metrics?.human_score);
+      const changeDelta = asNumber(latest?.change?.delta);
+      const noise = asNumber(latest?.change?.noise);
+
+      els.iterationId.textContent = iteration;
+      els.candidateScore.textContent = fmt(candidate);
+      els.scoreDelta.textContent = `${delta > 0 ? '+' : ''}${fmt(delta)}`;
+      applyDeltaColor(els.scoreDelta, delta);
+
+      els.stability.textContent = fmt(stability, 0);
+      els.confidenceQuality.textContent = fmt(confidenceQuality, 0);
+      els.humanScore.textContent = fmt(humanScore, 0);
+
+      els.ruleChanged.textContent = latest?.change?.rule ?? '-';
+      els.deltaApplied.textContent = `${changeDelta > 0 ? '+' : ''}${fmt(changeDelta, 0)}`;
+      els.noiseValue.textContent = fmt(noise, 3);
+      els.changeReason.textContent = latest?.change?.reason ?? '-';
+
+      if (changeDelta === 0) {
+        els.deltaZeroMessage.textContent = 'No change applied. System remained stable.';
+      } else {
+        els.deltaZeroMessage.textContent = '';
+      }
+
+      els.tableBaseline.textContent = fmt(baseline);
+      els.tableCandidate.textContent = fmt(candidate);
+      els.tableDelta.textContent = `${delta > 0 ? '+' : ''}${fmt(delta)}`;
+      applyDeltaColor(els.tableDelta, delta);
+
+      els.improvementNote.textContent = delta > 0 ? 'Improvement detected.' : 'No measurable improvement.';
+      applyDeltaColor(els.improvementNote, delta);
+    }
+
+    function drawLineChart(canvas, history) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, w, h);
+
+      if (!Array.isArray(history) || history.length < 2) {
+        return false;
+      }
+
+      const values = history.map(d => asNumber(d.final_score));
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const range = max - min || 1;
+
+      const pad = { top: 16, right: 16, bottom: 28, left: 36 };
+      const innerW = w - pad.left - pad.right;
+      const innerH = h - pad.top - pad.bottom;
+
+      ctx.strokeStyle = '#e0e0e0';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, pad.top);
+      ctx.lineTo(pad.left, h - pad.bottom);
+      ctx.lineTo(w - pad.right, h - pad.bottom);
+      ctx.stroke();
+
+      const points = history.map((item, i) => {
+        const x = pad.left + (innerW * i) / (history.length - 1);
+        const y = pad.top + (max - asNumber(item.final_score)) * (innerH / range);
+        return { x, y, label: item.iteration ?? String(i + 1), value: asNumber(item.final_score) };
+      });
+
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      points.forEach((p, i) => {
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      ctx.stroke();
+
+      ctx.fillStyle = '#222';
+      points.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2.3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      ctx.fillStyle = '#666';
+      ctx.font = '12px system-ui';
+      ctx.textAlign = 'right';
+      ctx.fillText(max.toFixed(1), pad.left - 6, pad.top + 4);
+      ctx.fillText(min.toFixed(1), pad.left - 6, h - pad.bottom + 4);
+
+      ctx.textAlign = 'center';
+      const first = points[0];
+      const last = points[points.length - 1];
+      ctx.fillText(first.label, first.x, h - 8);
+      ctx.fillText(last.label, last.x, h - 8);
+
+      return true;
+    }
+
+    async function loadJson(path) {
+      const res = await fetch(path, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`Failed to load ${path}`);
+      return res.json();
+    }
+
+    async function init() {
+      try {
+        const [latest, history] = await Promise.all([
+          loadJson('./data/latest_iteration.json'),
+          loadJson('./data/history.json')
+        ]);
+
+        renderSummary(latest);
+
+        const ok = drawLineChart(document.getElementById('timelineChart'), history);
+        els.timelineError.hidden = ok;
+
+        els.currentTimestamp.textContent = new Date().toLocaleString();
+      } catch (e) {
+        els.loadError.hidden = false;
+        els.currentTimestamp.textContent = new Date().toLocaleString();
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

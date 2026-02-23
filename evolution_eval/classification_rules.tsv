@@ -1,0 +1,9 @@
+# category|phases|exit_codes|weight|signature_patterns(; separated)
+SYNTAX_ERROR|*|1,2|3|unexpected EOF;syntax error;unterminated;parse error
+DEPENDENCY_ERROR|*|1,127|3|command not found;No module named;ModuleNotFoundError;Cannot find module;No such file or directory
+PERMISSION_ERROR|*|1,126|2|Permission denied;operation not permitted;EACCES
+USER_INTERRUPT|*|130|2|Interrupted;SIGINT;terminated by user
+OOM_KILL|*|137|3|Killed process;out of memory;OOM
+TIMEOUT|*|124|2|timed out;deadline exceeded;Timeout
+HARD_POLICY_BLOCK|DECISION,REFLEX,QUALITY_GATE,POST_GATE|1,2|4|\[POLICY_BLOCK\];HARD_POLICY_BLOCK_SIGNATURE
+GENERATOR_RUNTIME_ERROR|GENERATOR,BRAIN|1,2|2|generator failed;codex_generate;bootstrap stop

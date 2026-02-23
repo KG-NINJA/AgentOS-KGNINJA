@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Factory OS Console</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="container">
+    <h1>Factory OS Console</h1>
+
+    <label for="ideaInput">Idea</label>
+    <textarea id="ideaInput" placeholder="Describe the app you want Factory to build..."></textarea>
+
+    <button id="buildButton" type="button">Build App</button>
+
+    <section>
+      <h2>Job</h2>
+      <pre id="jobBox">No job submitted.</pre>
+    </section>
+
+    <section>
+      <h2>Status</h2>
+      <pre id="statusBox">Idle.</pre>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

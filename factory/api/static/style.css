@@ -1,0 +1,74 @@
+:root {
+  --bg: #111418;
+  --panel: #1b2128;
+  --text: #e6edf3;
+  --muted: #9fb0c0;
+  --accent: #4ea1ff;
+  --border: #2a3440;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1, h2 {
+  margin: 0 0 12px;
+}
+
+label {
+  display: block;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+textarea {
+  width: 100%;
+  min-height: 180px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  resize: vertical;
+  margin-bottom: 14px;
+}
+
+button {
+  width: 100%;
+  padding: 14px 16px;
+  background: var(--accent);
+  color: #05121f;
+  border: 0;
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-bottom: 18px;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+pre {
+  white-space: pre-wrap;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  color: var(--text);
+}

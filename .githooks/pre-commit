@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+./tools/tidy.sh
+./tools/verify.sh
