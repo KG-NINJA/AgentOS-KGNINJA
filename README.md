@@ -1,5 +1,17 @@
 # Factory OS 1.0 FINAL
 
+Factory OS is a self-operating agent system.
+
+Start it:
+
+`bash factory.sh start`
+
+Then drop a markdown file into:
+
+`queue/incoming/`
+
+The agent will build it automatically.
+
 Factory OS is a crash-safe autonomous build system that turns text briefs into working applications through a governed queue, deterministic execution, and observable repair loops.
 
 ## Project Status
