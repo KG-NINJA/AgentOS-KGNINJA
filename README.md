@@ -40,23 +40,17 @@ Factory OS operates as a queue-driven runtime.
 
 Jobs are text files placed in:
 
-
 queue/incoming/
-
 
 The runtime moves jobs through:
 
-
 incoming → leased → done | failed
-
 
 A worker daemon continuously executes jobs.
 
 Each job runs through:
 
-
 generate → validate → repair → validate → finalize
-
 
 No interactive prompting is required.
 
@@ -66,8 +60,6 @@ No interactive prompting is required.
 
 ## System Components
 
-Factory OS consists of several persistent subsystems.
-
 
 ### Queue Layer
 
@@ -75,12 +67,10 @@ Responsible for job scheduling.
 
 Directories:
 
-
-queue/incoming
-queue/leased
-queue/done
-queue/failed
-
+queue/incoming  
+queue/leased  
+queue/done  
+queue/failed  
 
 Leasing prevents duplicate execution.
 
@@ -109,9 +99,7 @@ Repair is performed by Codex.
 
 Repair loop:
 
-
 validate → repair → validate
-
 
 
 
@@ -121,14 +109,12 @@ factory.sh provides system control.
 
 Commands:
 
-
-factory start
-factory stop
-factory restart
-factory status
-factory repair
+factory start  
+factory stop  
+factory restart  
+factory status  
+factory repair  
 factory selftest
-
 
 
 
@@ -136,17 +122,13 @@ factory selftest
 
 Runtime state is persisted in:
 
-
 runtime/
-
 
 Important files:
 
-
-runtime/task_state.json
-runtime/metrics.jsonl
+runtime/task_state.json  
+runtime/metrics.jsonl  
 runtime/codex_sessions.json
-
 
 The system is restart-safe.
 
@@ -202,9 +184,7 @@ Selftest verifies:
 
 Run:
 
-
 bash factory.sh selftest
-
 
 
 
@@ -216,11 +196,9 @@ Most coding agents operate interactively:
 
 User → Prompt → Output
 
-
 Factory OS operates continuously:
 
 Queue → Runtime → Artifacts
-
 
 Factory OS treats software generation as
 a long-running process rather than
@@ -243,6 +221,3 @@ Stable autonomous runtime confirmed.
 ## License
 
 MIT
-
-
-------------------------------------------------------------
