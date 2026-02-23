@@ -2,22 +2,39 @@
 
 Crash-safe autonomous agent operating system.
 
-Factory OS converts text ideas into working software using:
+Factory OS turns text ideas into working software automatically.
 
-- Persistent queue execution
-- Autonomous workers
-- Self-healing repair loops
-- Codex-based generation
-- Session persistence
-- Control plane CLI
+Unlike typical coding agents:
 
-Fully autonomous.
-Restart-safe.
-Observable.
+User → Prompt → Code
+
+Factory OS:
+
+User → Queue → Autonomous OS → Software
 
 Repository:
 
 https://github.com/KG-NINJA/AgentOS-KGNINJA
+
+
+---------------------------------
+
+## Why Factory OS Exists
+
+Modern coding agents generate code.
+
+Factory OS runs them as an operating system.
+
+Factory OS provides:
+
+- Persistent execution
+- Crash-safe recovery
+- Lease-based job control
+- Automatic repair loops
+- Runtime observability
+- Selftest verification
+
+Factory OS keeps running even when jobs fail.
 
 
 ---------------------------------
@@ -43,14 +60,14 @@ Factory OS will automatically:
 - validate output
 - repair failures
 - record metrics
-- produce artifacts
+- finish execution
 
 
 ---------------------------------
 
-## Example Run
+## Example
 
-Create job:
+Create a job:
 
     echo "Build snake game" > queue/incoming/snake.md
 
@@ -58,7 +75,7 @@ Start OS:
 
     bash factory.sh start
 
-Observe:
+Check status:
 
     bash factory.sh status
 
@@ -73,7 +90,7 @@ Result:
 
 Factory OS is a queue-governed autonomous system.
 
-User input:
+Input:
 
     queue/incoming/*.md
 
@@ -86,7 +103,7 @@ Execution flow:
       → repair
       → done | failed
 
-Key components:
+Core components:
 
 Queue Layer
 
@@ -120,85 +137,63 @@ Runtime State
 
 ---------------------------------
 
-## Why Factory OS
-
-Typical agents:
-
-User → Prompt → Code
-
-Factory OS:
-
-User → Queue → Autonomous OS → Software
-
-
-Factory OS provides:
-
-- crash-safe execution
-- lease recovery
-- persistent sessions
-- selftest verification
-- repair automation
-- runtime metrics
-
-
----------------------------------
-
 ## Features
 
-### Queue-based execution
+### Persistent Queue
 
-Jobs are submitted as markdown files.
+Jobs are markdown files.
 
-Factory OS processes them automatically.
-
-
-### Lease recovery
-
-Stale jobs are automatically rescued.
+Factory OS executes them continuously.
 
 
-### Self repair
+### Crash-safe execution
 
-Failures trigger automatic repair.
-
-
-### Persistent sessions
-
-Codex sessions are reused and tracked.
+Workers recover automatically after interruption.
 
 
-### Control plane
+### Lease Recovery
 
-Single command interface:
+Stale jobs are rescued automatically.
 
-    factory start
-    factory stop
-    factory status
-    factory repair
-    factory selftest
+
+### Automatic Repair
+
+Failures trigger repair loops.
+
+
+### Persistent Sessions
+
+Codex sessions are reused.
+
+
+### Selftest
+
+Full system verification:
+
+    bash factory.sh selftest
 
 
 ---------------------------------
 
 ## Commands
 
-Start OS:
+Start:
 
     bash factory.sh start
 
-Stop OS:
+Stop:
 
     bash factory.sh stop
 
-Check status:
+Status:
 
     bash factory.sh status
 
-Repair system:
+Repair:
 
     bash factory.sh repair
 
-Run selftest:
+Selftest:
 
     bash factory.sh selftest
 
@@ -209,36 +204,18 @@ Version:
 
 ---------------------------------
 
-## Selftest
+## Runtime
 
-Factory OS includes a full black-box selftest.
-
-Selftest verifies:
-
-- queue execution
-- lease handling
-- metrics writing
-- repair logic
-- session reuse
-- API health (if available)
-
-Run:
-
-    bash factory.sh selftest
-
-
----------------------------------
-
-## Runtime Files
-
-Factory OS stores runtime state in:
+Runtime state:
 
 runtime/
 
 Important files:
 
 runtime/task_state.json
+
 runtime/metrics.jsonl
+
 runtime/codex_sessions.json
 
 
@@ -246,13 +223,13 @@ runtime/codex_sessions.json
 
 ## Design Goals
 
-Factory OS was designed to be:
+Factory OS is designed to be:
 
-- autonomous
-- restart-safe
-- observable
-- minimal
-- script-driven
+- Autonomous
+- Restart-safe
+- Observable
+- Script-driven
+- Minimal
 
 
 ---------------------------------
