@@ -1,251 +1,248 @@
 # Factory OS 1.0 FINAL
 
-Crash-safe autonomous agent operating system.
+Factory OS is a persistent autonomous software runtime.
 
-Factory OS turns text ideas into working software automatically.
+It continuously consumes tasks from a queue
+and produces software artifacts.
 
-Unlike typical coding agents:
+Factory OS is not a chatbot.
+It is not a prompt tool.
 
-User → Prompt → Code
-
-Factory OS:
-
-User → Queue → Autonomous OS → Software
-
-Repository:
-
-https://github.com/KG-NINJA/AgentOS-KGNINJA
+It is an always-running autonomous execution system.
 
 
----------------------------------
 
-## Why Factory OS Exists
+------------------------------------------------------------
 
-Modern coding agents generate code.
+## Overview
 
-Factory OS runs them as an operating system.
+Factory OS is an experiment in building a persistent
+autonomous agent runtime.
 
-Factory OS provides:
+The system is designed to:
 
-- Persistent execution
-- Crash-safe recovery
-- Lease-based job control
-- Automatic repair loops
-- Runtime observability
-- Selftest verification
+- run continuously
+- execute queued tasks
+- survive crashes
+- recover incomplete jobs
+- repair failed outputs
+- maintain runtime state
 
-Factory OS keeps running even when jobs fail.
+The primary goal is reliability before intelligence.
 
 
----------------------------------
 
-## Quick Start
+------------------------------------------------------------
 
-Start Factory OS:
+## Execution Model
 
-    bash factory.sh start
+Factory OS operates as a queue-driven runtime.
 
-Submit a job:
+Jobs are text files placed in:
 
-    echo "Build a todo app" > queue/incoming/todo.md
 
-Check status:
+queue/incoming/
 
-    bash factory.sh status
 
-Factory OS will automatically:
+The runtime moves jobs through:
 
-- lease the job
-- generate code
-- validate output
-- repair failures
+
+incoming → leased → done | failed
+
+
+A worker daemon continuously executes jobs.
+
+Each job runs through:
+
+
+generate → validate → repair → validate → finalize
+
+
+No interactive prompting is required.
+
+
+
+------------------------------------------------------------
+
+## System Components
+
+Factory OS consists of several persistent subsystems.
+
+
+### Queue Layer
+
+Responsible for job scheduling.
+
+Directories:
+
+
+queue/incoming
+queue/leased
+queue/done
+queue/failed
+
+
+Leasing prevents duplicate execution.
+
+Lease recovery restores abandoned jobs.
+
+
+
+### Worker Runtime
+
+watch_queue.sh runs continuously.
+
+Responsibilities:
+
+- lease jobs
+- execute builds
 - record metrics
-- finish execution
+- handle failures
 
 
----------------------------------
 
-## Example
+### Repair Runtime
 
-Create a job:
+Failures trigger repair attempts.
 
-    echo "Build snake game" > queue/incoming/snake.md
+Repair is performed by Codex.
 
-Start OS:
-
-    bash factory.sh start
-
-Check status:
-
-    bash factory.sh status
-
-Result:
-
-    queue/done/snake.md
+Repair loop:
 
 
----------------------------------
-
-## Architecture
-
-Factory OS is a queue-governed autonomous system.
-
-Input:
-
-    queue/incoming/*.md
-
-Execution flow:
-
-    incoming
-      → leased
-      → build
-      → validate
-      → repair
-      → done | failed
-
-Core components:
-
-Queue Layer
-
-- queue/incoming
-- queue/leased
-- queue/done
-- queue/failed
-
-Execution Layer
-
-- watch_queue.sh
-- run_job.sh
-- validate.sh
-
-Repair Layer
-
-- codex_fix.sh
-- repair daemon
-- session manager
-
-Control Plane
-
-- factory.sh CLI
-
-Runtime State
-
-- runtime/task_state.json
-- runtime/metrics.jsonl
-- runtime/codex_sessions.json
+validate → repair → validate
 
 
----------------------------------
-
-## Features
-
-### Persistent Queue
-
-Jobs are markdown files.
-
-Factory OS executes them continuously.
 
 
-### Crash-safe execution
+### Control Plane
 
-Workers recover automatically after interruption.
+factory.sh provides system control.
 
-
-### Lease Recovery
-
-Stale jobs are rescued automatically.
+Commands:
 
 
-### Automatic Repair
+factory start
+factory stop
+factory restart
+factory status
+factory repair
+factory selftest
 
-Failures trigger repair loops.
+
+
+
+### Runtime State
+
+Runtime state is persisted in:
+
+
+runtime/
+
+
+Important files:
+
+
+runtime/task_state.json
+runtime/metrics.jsonl
+runtime/codex_sessions.json
+
+
+The system is restart-safe.
+
+
+
+------------------------------------------------------------
+
+## Reliability Mechanisms
+
+
+### Crash Safety
+
+Worker restarts do not lose jobs.
+
+Incomplete jobs remain leased
+until recovered.
+
+
+
+### Lease Rescue
+
+Stale leases are detected automatically.
+
+Abandoned jobs return to incoming.
+
+
+
+### Repair Loop
+
+Failed outputs trigger automatic repair attempts.
+
 
 
 ### Persistent Sessions
 
-Codex sessions are reused.
+Codex sessions persist across jobs.
 
 
-### Selftest
 
-Full system verification:
+------------------------------------------------------------
 
-    bash factory.sh selftest
+## Selftest
 
+Factory OS includes a black-box selftest.
 
----------------------------------
+Selftest verifies:
 
-## Commands
+- queue execution
+- lease handling
+- metrics recording
+- repair execution
+- session reuse
 
-Start:
-
-    bash factory.sh start
-
-Stop:
-
-    bash factory.sh stop
-
-Status:
-
-    bash factory.sh status
-
-Repair:
-
-    bash factory.sh repair
-
-Selftest:
-
-    bash factory.sh selftest
-
-Version:
-
-    bash factory.sh version
+Run:
 
 
----------------------------------
-
-## Runtime
-
-Runtime state:
-
-runtime/
-
-Important files:
-
-runtime/task_state.json
-
-runtime/metrics.jsonl
-
-runtime/codex_sessions.json
+bash factory.sh selftest
 
 
----------------------------------
-
-## Design Goals
-
-Factory OS is designed to be:
-
-- Autonomous
-- Restart-safe
-- Observable
-- Script-driven
-- Minimal
 
 
----------------------------------
+------------------------------------------------------------
+
+## Philosophy
+
+Most coding agents operate interactively:
+
+User → Prompt → Output
+
+
+Factory OS operates continuously:
+
+Queue → Runtime → Artifacts
+
+
+Factory OS treats software generation as
+a long-running process rather than
+a sequence of prompts.
+
+
+
+------------------------------------------------------------
 
 ## Status
 
 Factory OS 1.0 FINAL
 
-Stable autonomous operation confirmed.
+Stable autonomous runtime confirmed.
 
 
----------------------------------
+
+------------------------------------------------------------
 
 ## License
 
 MIT
 
 
----------------------------------
+------------------------------------------------------------
