@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a reproducible defect in Factory OS behavior
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Exact commands and inputs to reproduce.
+      placeholder: |
+        1. bash factory.sh start
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Include `factory.sh status` and relevant `runtime/` snippets.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: Factory OS 1.0 FINAL

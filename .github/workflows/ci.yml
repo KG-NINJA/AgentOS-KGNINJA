@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Shell syntax checks
+        run: |
+          bash -n factory.sh
+          bash -n install.sh
+          find factory -type f -name "*.sh" -print0 | xargs -0 -I{} bash -n "{}"
+
+      - name: Python syntax checks
+        run: |
+          find factory diagnostics evolution_eval -type f -name "*.py" -print0 | xargs -0 python3 -m py_compile

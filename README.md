@@ -2,6 +2,19 @@
 
 Factory OS is a crash-safe autonomous build system that turns text briefs into working applications through a governed queue, deterministic execution, and observable repair loops.
 
+## Project Status
+
+- Version: `Factory OS 1.0 FINAL`
+- Stability target: production-oriented autonomous operation
+- Primary audience: agent framework developers and autonomous systems engineers
+
+## Governance and Contribution
+
+- License: `MIT` (see `LICENSE`)
+- Security policy: see `SECURITY.md`
+- Contributor guide: see `CONTRIBUTING.md`
+- Code of conduct: see `CODE_OF_CONDUCT.md`
+
 ---
 
 ## Core Concept
@@ -123,6 +136,19 @@ bash factory.sh status
 ```
 
 The installer prepares queue/runtime directories and enables optional systemd units if present.
+
+## Development Checks
+
+```bash
+# Shell syntax checks
+bash -n factory.sh install.sh factory/**/*.sh
+
+# Python syntax checks
+python3 -m py_compile factory/**/*.py diagnostics/*.py evolution_eval/*.py
+
+# End-to-end selftest
+bash factory.sh selftest
+```
 
 ---
 
