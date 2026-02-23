@@ -1,204 +1,274 @@
 # Factory OS 1.0 FINAL
 
-Factory OS is a self-operating agent system.
+Crash-safe autonomous agent operating system.
 
-Start it:
+Factory OS converts text ideas into working software using:
 
-`bash factory.sh start`
+- Persistent queue execution
+- Autonomous workers
+- Self-healing repair loops
+- Codex-based generation
+- Session persistence
+- Control plane CLI
 
-Then drop a markdown file into:
+Fully autonomous.
+Restart-safe.
+Observable.
 
-`queue/incoming/`
+Repository:
 
-The agent will build it automatically.
+https://github.com/KG-NINJA/AgentOS-KGNINJA
 
-Factory OS is a crash-safe autonomous build system that turns text briefs into working applications through a governed queue, deterministic execution, and observable repair loops.
 
-## Project Status
+---------------------------------
 
-- Version: `Factory OS 1.0 FINAL`
-- Stability target: production-oriented autonomous operation
-- Primary audience: agent framework developers and autonomous systems engineers
+## Quick Start
 
-## Governance and Contribution
+Start Factory OS:
 
-- License: `MIT` (see `LICENSE`)
-- Security policy: see `SECURITY.md`
-- Contributor guide: see `CONTRIBUTING.md`
-- Code of conduct: see `CODE_OF_CONDUCT.md`
+    bash factory.sh start
 
----
+Submit a job:
 
-## Core Concept
+    echo "Build a todo app" > queue/incoming/todo.md
 
-Idea → Queue → Factory → Validate → Repair → Deploy
+Check status:
 
-```
-+---------+      +---------+      +-----------+      +-----------+      +---------+      +---------+
-|  Idea   | ---> |  Queue  | ---> |  Factory  | ---> | Validate  | ---> | Repair  | ---> | Deploy  |
-+---------+      +---------+      +-----------+      +-----------+      +---------+      +---------+
-```
+    bash factory.sh status
 
-Human-authored markdown enters the queue, the factory executes the run pipeline, validators enforce quality, automated repair attempts fixes, and deployments happen only after a verified build.
+Factory OS will automatically:
 
----
+- lease the job
+- generate code
+- validate output
+- repair failures
+- record metrics
+- produce artifacts
 
-## Design Goals
 
-- **Single-command operation** – Install, start, stop, repair, and test via the `factory.sh` CLI.
-- **Crash-safe architecture** – Background workers respawn safely, and `factory start` / `factory repair` are idempotent.
-- **Deadlock-safe queue** – Leased jobs are rescued automatically; the queue never stays stuck in a leased state.
-- **Self-healing builds** – Validation failures feed into Codex repair loops and session persistence.
-- **Observability-first design** – Metrics, task state, and sessions are written to JSONL/JSON for replay and diagnosis.
+---------------------------------
 
----
+## Example Run
+
+Create job:
+
+    echo "Build snake game" > queue/incoming/snake.md
+
+Start OS:
+
+    bash factory.sh start
+
+Observe:
+
+    bash factory.sh status
+
+Result:
+
+    queue/done/snake.md
+
+
+---------------------------------
 
 ## Architecture
 
-| Layer | Components | Purpose |
-|-------|------------|---------|
-| **Queue Layer** | `queue/incoming`, `queue/leased`, `queue/done`, `queue/failed` | Persistent mailbox for intents with lease + rescue semantics. |
-| **Execution Layer** | `factory/os/watch_queue.sh`, `factory/os/run_job.sh`, `factory/repair/validate.sh` | Dequeues work, runs the gated build pipeline, and records metrics. |
-| **Repair Layer** | `factory/repair/codex_fix.sh`, `factory/agent/codex_daemon.py`, `factory/agent/session_manager.py` | Applies Codex-driven fixes, maintains daemon processes, and keeps reusable sessions. |
-| **Control Plane** | `factory.sh`, `factory/os/status.sh`, `factory.sh repair`, `factory.sh selftest` | Provides the CLI entry point, health surface, repair automation, and self-test validation. |
-| **Runtime** | `runtime/metrics.jsonl`, `runtime/task_state.json`, `runtime/codex_sessions.json` | Central evidence store for job outcomes, orchestration state, and Codex session reuse. |
+Factory OS is a queue-governed autonomous system.
 
----
+User input:
 
-## Command Interface
+    queue/incoming/*.md
 
-### Start
-```bash
-bash factory.sh start
-```
-Bootstrap runtime directories, rescue stale leases, launch the watch queue, Codex daemon (if installed), optional API server, and validate health.
+Execution flow:
 
-### Stop
-```bash
-bash factory.sh stop
-```
-Stop API, Codex daemon, user systemd services, and watcher processes safely.
+    incoming
+      → leased
+      → build
+      → validate
+      → repair
+      → done | failed
 
-### Status
-```bash
-bash factory.sh status
-```
-Print queue counts, worker/app/API states, session totals, last metrics entry, and overall health.
+Key components:
 
-### Selftest
-```bash
-bash factory.sh selftest
-```
-Run an end-to-end queue enqueue → lease → metrics → session → API smoke test. Outputs `SELFTEST OK` or `SELFTEST FAIL` with detail.
+Queue Layer
 
-### Repair
-```bash
-bash factory.sh repair
-```
-Rescue leases, ensure runtime bootstrapping, restart missing workers/daemons, and report restarted components.
+- queue/incoming
+- queue/leased
+- queue/done
+- queue/failed
 
----
+Execution Layer
 
-## Queue Format
+- watch_queue.sh
+- run_job.sh
+- validate.sh
 
-Jobs are markdown files dropped into `queue/incoming`. The header configures routing via simple key-value pairs.
+Repair Layer
 
-```
-app_id: todo_app
+- codex_fix.sh
+- repair daemon
+- session manager
 
-Build a minimal todo application.
-```
+Control Plane
 
-The queue layer handles leasing (`queue/leased`), completion (`queue/done`), and failures (`queue/failed`). `factory/queue/rescue_leases.sh` guarantees recovery of stranded jobs.
+- factory.sh CLI
 
----
+Runtime State
 
-## Repair System
+- runtime/task_state.json
+- runtime/metrics.jsonl
+- runtime/codex_sessions.json
 
-```
-factory run → validate → codex_fix → retry (bounded) → finalize
-```
 
-- Validation failures produce logs plus `runtime/metrics.jsonl` entries.
-- `codex_fix.sh` consults Codex to apply targeted patches using session context.
-- Each repair attempts a bounded number of retries before marking the job failed, keeping artifacts inspectable for manual follow-up.
+---------------------------------
 
----
+## Why Factory OS
 
-## Codex Integration
+Typical agents:
 
-- **Persistent sessions** – `runtime/codex_sessions.json` tracks reusable session IDs for each app_id.
-- **Repair transport** – The Codex daemon listens through `factory/agent/app_server_control.sh` for stateless commands.
-- **Fallback execution** – When Codex is unavailable, CLI commands remain operational; status will show the Codex subsystem as stopped.
+User → Prompt → Code
 
----
+Factory OS:
 
-## Deployment Model
+User → Queue → Autonomous OS → Software
 
-Factory OS focuses on building artifacts deterministically. Deployment is performed downstream through Git push + GitHub Actions (or similar CI) which then publish to the appropriate hosting target. Keeping deploy external maintains separation of concerns and allows any organization-specific pipeline to consume the generated output.
 
----
+Factory OS provides:
 
-## Installation
+- crash-safe execution
+- lease recovery
+- persistent sessions
+- selftest verification
+- repair automation
+- runtime metrics
 
-```bash
-bash install.sh
-bash factory.sh start
-bash factory.sh status
-```
 
-The installer prepares queue/runtime directories and enables optional systemd units if present.
+---------------------------------
 
-## Development Checks
+## Features
 
-```bash
-# Shell syntax checks
-bash -n factory.sh install.sh factory/**/*.sh
+### Queue-based execution
 
-# Python syntax checks
-python3 -m py_compile factory/**/*.py diagnostics/*.py evolution_eval/*.py
+Jobs are submitted as markdown files.
 
-# End-to-end selftest
-bash factory.sh selftest
-```
+Factory OS processes them automatically.
 
----
 
-## Minimal Requirements
+### Lease recovery
 
-- Linux environment (bare metal or server)
-- WSL is supported for Windows developers
+Stale jobs are automatically rescued.
 
-Codex CLI must be installed for repair functionality, but the rest of the system operates with standard POSIX tooling.
 
----
+### Self repair
 
-## Philosophy
+Failures trigger automatic repair.
 
-Factory OS is an agent operating system: a persistent idea-to-software environment with explicit control planes, safety gates, and repair loops. It is **not** a CI pipeline or a loose script collection; every workflow is routed through the queue and CLI.
 
----
+### Persistent sessions
 
-## Reliability Model
+Codex sessions are reused and tracked.
 
-**Guaranteed:**
-- Restart-safe recovery (`factory start` and `factory repair` are idempotent)
-- Lease recovery via `rescue_leases.sh`
-- Repairable builds with bounded retries
 
-**Not guaranteed:**
-- Perfect builds. Human review and downstream CI should still evaluate artifacts.
+### Control plane
 
----
+Single command interface:
 
-## Roadmap
+    factory start
+    factory stop
+    factory status
+    factory repair
+    factory selftest
 
-- Distributed workers for horizontal scaling
-- Remote agents coordinating specialized skills
-- Metrics anomaly detection on `runtime/metrics.jsonl`
 
----
+---------------------------------
 
-## Version
+## Commands
+
+Start OS:
+
+    bash factory.sh start
+
+Stop OS:
+
+    bash factory.sh stop
+
+Check status:
+
+    bash factory.sh status
+
+Repair system:
+
+    bash factory.sh repair
+
+Run selftest:
+
+    bash factory.sh selftest
+
+Version:
+
+    bash factory.sh version
+
+
+---------------------------------
+
+## Selftest
+
+Factory OS includes a full black-box selftest.
+
+Selftest verifies:
+
+- queue execution
+- lease handling
+- metrics writing
+- repair logic
+- session reuse
+- API health (if available)
+
+Run:
+
+    bash factory.sh selftest
+
+
+---------------------------------
+
+## Runtime Files
+
+Factory OS stores runtime state in:
+
+runtime/
+
+Important files:
+
+runtime/task_state.json
+runtime/metrics.jsonl
+runtime/codex_sessions.json
+
+
+---------------------------------
+
+## Design Goals
+
+Factory OS was designed to be:
+
+- autonomous
+- restart-safe
+- observable
+- minimal
+- script-driven
+
+
+---------------------------------
+
+## Status
 
 Factory OS 1.0 FINAL
+
+Stable autonomous operation confirmed.
+
+
+---------------------------------
+
+## License
+
+MIT
+
+
+---------------------------------
