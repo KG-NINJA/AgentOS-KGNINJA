@@ -268,6 +268,49 @@ curl -X POST https://example.com/api/diagnose \
 }
 ```
 
+## Agentic Commerce Integration
+
+This repository includes a **paid error‑fixing service** for AI agents. Agents can programmatically purchase a diagnostic report and fix suggestions for a failed command or API call. The service leverages Stripe’s **Machine Payments Protocol (MPP)** and **Link agent wallet** running on the **Tempo** blockchain. These technologies enable micro‑payments in stablecoins or card tokens, while granting agents restricted spending authority with human approval flows.
+
+### Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/.well-known/agentic-commerce.json` | GET | Returns the product metadata, including pricing (500 JPY), supported payment methods (card, Tempo, Link) and URLs for the goal spec, payment link and fulfillment. |
+| `/agent.json` | GET | Same as above; duplicate location for convenience. |
+| `/goal` | GET | Returns the goal specification describing required input fields (`failing_command_or_request`, `environment`, `exact_error_log`) and expected outputs. |
+| `/payment-link` & `/buy` | GET | Returns a Stripe payment link where the agent/user can pay the 500 JPY fee. |
+| `/fulfillment` | POST | Submit a JSON payload with your command, environment and error log. After verifying payment, the service returns a JSON object with a diagnosis, likely cause, next commands to run, a retry plan, risk notes and a confidence score. |
+| `/llms.txt` | GET | Human‑readable instructions for LLMs and AI agents (do not include secrets). |
+
+### Example Workflow
+
+1. Call `GET /goal` to understand the required input fields.
+2. Prompt the user (or automatically) to purchase the service by visiting the URL returned from `GET /payment-link`. The user can pay via Stripe Link agent wallet or card; Link enforces spending limits and human approval when necessary.
+3. Once payment is complete, send a `POST` request to `/fulfillment` with a JSON body:
+
+   ```json
+   {
+     "failing_command_or_request": "python myscript.py",
+     "environment": "Ubuntu 20.04, Python 3.10",
+     "exact_error_log": "Traceback (most recent call last): ..."
+   }
+   ```
+
+4. The response will contain the diagnosis, likely cause, suggested next commands, a retry plan, risk notes and a confidence value.
+
+### Technology Notes
+
+* **Tempo** is a payment‑optimized blockchain designed by Stripe. It offers dedicated payment lanes and low fees, enabling stablecoin transactions that cost as little as 0.1 ¢. Tempo’s TIP‑20 token standard allows attachments like invoice IDs, and gas fees can be paid in stablecoins.
+* **Machine Payments Protocol (MPP)** is an open standard co‑authored by Stripe and Tempo that allows services to request payment programmatically and return data once payment is confirmed. It supports Shared Payment Tokens (SPTs) so that cards and stablecoins can be used interchangeably.
+* **Link agent wallet** extends Stripe’s Link wallet with agent delegation. Users can connect payment methods and grant agents spend limits and approval conditions; sensitive credentials are never shared with the agent.
+
+### Legal and Safety
+
+This service is provided as a digital product. Price is fixed at 500 JPY per diagnostic session.
+Due to the nature of digital services, cancellations or refunds are not available once the analysis has begun.
+Always sanitize logs before sending them; do not include secrets, credentials or personally identifiable information.
+
 ## Limitations
 - Phase 1 implementation is rule-based and deterministic.
 - Diagnosis is limited to predefined patterns (timeout, permissions, port conflicts, etc.).
