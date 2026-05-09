@@ -218,6 +218,74 @@ Stable autonomous runtime confirmed.
 
 ------------------------------------------------------------
 
+# For AI Agents
+
+## Service Purpose
+AgentOS-KGNINJA / Factory OS provides a structured AI-agent diagnosis API and a self-healing runtime foundation. It is designed to be a queue-oriented repair gateway that AI agents can use to diagnose infrastructure and runtime errors.
+
+## Capability Discovery
+Agents can discover the system's capabilities and public API endpoints at:
+`GET /.well-known/ai-capabilities.json`
+
+## Diagnosis API
+The diagnosis API provides deterministic, rule-based repair guidance for common infrastructure errors.
+
+### Usage Example
+```bash
+curl -X POST https://example.com/api/diagnose \
+  -H "Content-Type: application/json" \
+  -d '{
+    "error_log": "Timed out after 60s waiting for gateway port 18789",
+    "environment": "ubuntu",
+    "service": "openclaw-gateway"
+  }'
+```
+
+### Input Schema
+```json
+{
+  "type": "object",
+  "properties": {
+    "error_log": { "type": "string" },
+    "environment": { "type": "string" },
+    "service": { "type": "string" }
+  },
+  "required": ["error_log"]
+}
+```
+
+### Output Schema
+```json
+{
+  "type": "object",
+  "properties": {
+    "summary": { "type": "string" },
+    "probable_causes": { "type": "array", "items": { "type": "string" } },
+    "safe_first_steps": { "type": "array", "items": { "type": "string" } },
+    "risk_level": { "enum": ["low", "medium", "high"] },
+    "requires_human_confirmation": { "type": "boolean" }
+  }
+}
+```
+
+## Limitations
+- Phase 1 implementation is rule-based and deterministic.
+- Diagnosis is limited to predefined patterns (timeout, permissions, port conflicts, etc.).
+- Does not execute any repair commands automatically; provides guidance only.
+
+## Safety Guarantees
+- Diagnosis-only public API.
+- No remote shell execution.
+- No exposure of system secrets.
+- Input is treated as data, never executed.
+
+## Intended Usage
+- AI agents encountering runtime errors.
+- Autonomous coding runtimes needing repair guidance.
+- VPS automation systems for crash recovery assistance.
+
+------------------------------------------------------------
+
 ## License
 
 MIT
