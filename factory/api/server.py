@@ -153,6 +153,23 @@ class Handler(SimpleHTTPRequestHandler):
             self._send_json(200, {"status": "ok"})
             return
 
+        if self.path == "/.well-known/ai-capabilities.json":
+            self._send_json(200, {
+                "name": "AgentOS-KGNINJA",
+                "description": "Self-healing queue runtime and AI-agent repair gateway.",
+                "capabilities": [
+                    "diagnosis",
+                    "repair-guidance",
+                    "queue-processing",
+                    "crash-recovery"
+                ],
+                "public_api": {
+                    "health": "/health",
+                    "diagnose": "/api/diagnose"
+                }
+            })
+            return
+
         if self.path == "/status":
             payload = {
                 "incoming": _count_dir(_queue_path("incoming")),
@@ -187,7 +204,94 @@ class Handler(SimpleHTTPRequestHandler):
 
         self._send_json(404, {"error": "not_found"})
 
+    def _diagnose(self, error_log):
+        rules = [
+            {
+                "patterns": ["timeout", "timed out"],
+                "summary": "The operation timed out.",
+                "causes": ["Network latency", "Heavy resource usage", "Service unresponsive"],
+                "steps": ["Increase timeout settings", "Check service health", "Check network connectivity"],
+                "risk": "low"
+            },
+            {
+                "patterns": ["EACCES", "permission denied"],
+                "summary": "Permission denied error.",
+                "causes": ["Incorrect file permissions", "Insufficient user privileges"],
+                "steps": ["Check file permissions with 'ls -l'", "Run with appropriate user privileges"],
+                "risk": "medium"
+            },
+            {
+                "patterns": ["rate limit"],
+                "summary": "API rate limit exceeded.",
+                "causes": ["Too many requests in a short period"],
+                "steps": ["Implement exponential backoff", "Reduce request frequency"],
+                "risk": "low"
+            },
+            {
+                "patterns": ["gateway not reachable", "502 Bad Gateway", "504 Gateway Timeout"],
+                "summary": "Gateway or upstream service is unreachable.",
+                "causes": ["Downstream service is down", "Network partitioning"],
+                "steps": ["Verify upstream service status", "Check proxy/load balancer logs"],
+                "risk": "medium"
+            },
+            {
+                "patterns": ["systemd failed", "failed to start"],
+                "summary": "A systemd service failed to start.",
+                "causes": ["Configuration error", "Missing dependencies", "Resource conflicts"],
+                "steps": ["Check logs using 'journalctl -u <service>'", "Verify service configuration"],
+                "risk": "medium"
+            },
+            {
+                "patterns": ["port already in use", "address already in use"],
+                "summary": "The requested port is already occupied.",
+                "causes": ["Another process is running on the same port"],
+                "steps": ["Identify the process using 'lsof -i :<port>'", "Kill the conflicting process or use a different port"],
+                "risk": "low"
+            },
+            {
+                "patterns": ["npm install failure", "npm ERR!"],
+                "summary": "NPM package installation failed.",
+                "causes": ["Network issues", "Package version conflicts", "Registry unavailability"],
+                "steps": ["Check npm-debug.log", "Try clearing npm cache", "Verify package.json dependencies"],
+                "risk": "low"
+            }
+        ]
+
+        for rule in rules:
+            for pattern in rule["patterns"]:
+                if pattern.lower() in error_log.lower():
+                    return {
+                        "summary": rule["summary"],
+                        "probable_causes": rule["causes"],
+                        "safe_first_steps": rule["steps"],
+                        "risk_level": rule["risk"],
+                        "requires_human_confirmation": rule["risk"] == "high"
+                    }
+
+        return {
+            "summary": "Unknown error detected.",
+            "probable_causes": ["Unrecognized error pattern"],
+            "safe_first_steps": ["Inspect the full error log", "Check system logs for more context"],
+            "risk_level": "medium",
+            "requires_human_confirmation": False
+        }
+
     def do_POST(self):
+        if self.path == "/api/diagnose":
+            payload = self._read_json()
+            if not isinstance(payload, dict):
+                self._send_json(400, {"error": "invalid_json"})
+                return
+
+            error_log = payload.get("error_log", "")
+            if not isinstance(error_log, str) or not error_log:
+                self._send_json(400, {"error": "error_log_required"})
+                return
+
+            diagnosis = self._diagnose(error_log)
+            self._send_json(200, diagnosis)
+            return
+
         if self.path != "/build":
             self._send_json(404, {"error": "not_found"})
             return
