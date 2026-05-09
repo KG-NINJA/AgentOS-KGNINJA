@@ -16,6 +16,34 @@ PORT = 8787
 # Agentic commerce metadata
 PAYMENT_LINK_URL = "https://buy.stripe.com/14AaEWcbm03W1OsaWD2Ji00"
 ERROR_FIX_PRICE_JPY = 500
+BASE_URL = "https://agentos-revenue-cloudflare.fuwafuwow.workers.dev"
+
+SAMPLE_RECEIPT = {
+  "sample": True,
+  "note": "This is a demonstration receipt. Real receipts are returned after payment at /buy.",
+  "input_echo": {
+    "failing_command_or_request": "wrangler deploy",
+    "environment": "Cloudflare Workers, wrangler 3.x, Node 20, WSL2 Ubuntu",
+    "exact_error_log": "Error: Missing required environment variable: STRIPE_SECRET_KEY. Add it with: wrangler secret put STRIPE_SECRET_KEY"
+  },
+  "diagnosis": "Cloudflare Worker deployment failed due to missing production secret. The variable exists in local .dev.vars but has not been pushed to the Cloudflare production environment.",
+  "likely_cause": "wrangler.toml [vars] or .dev.vars entries are local-only and are never deployed. Production secrets must be explicitly set via wrangler secret put.",
+  "next_commands": [
+    "wrangler secret put STRIPE_SECRET_KEY",
+    "wrangler deploy"
+  ],
+  "retry_plan": [
+    "Run: wrangler secret put STRIPE_SECRET_KEY (paste the value when prompted)",
+    "Verify with: wrangler secret list",
+    "Re-run: wrangler deploy",
+    "Confirm endpoint responds correctly after deploy"
+  ],
+  "risk_notes": [
+    "Never commit secret values to Git or wrangler.toml",
+    "If CI/CD pipeline runs wrangler deploy, add the secret via Cloudflare dashboard > Workers > Settings > Variables"
+  ],
+  "confidence": 0.93
+}
 
 AGENT_METADATA = {
   "name": "Agent Error Fix Receipt",
@@ -36,6 +64,11 @@ AGENT_METADATA = {
     "llms_txt_url": "/llms.txt",
     "payment_link_url": "/payment-link",
     "buy_url": "/buy"
+  },
+  "trust": {
+    "sample_receipt_url": f"{BASE_URL}/sample-receipt",
+    "confidence_threshold_for_refund": 0.6,
+    "refund_policy": "If confidence < 0.6, full refund available via seller contact."
   },
   "agent_funnel": {
     "first_step": "/goal",
@@ -102,7 +135,8 @@ AGENT_METADATA = {
     "agent_catalog": "/agent.json",
     "well_known_agentic_commerce": "/.well-known/agentic-commerce.json",
     "legal": "/legal",
-    "fulfillment": "/fulfillment"
+    "fulfillment": "/fulfillment",
+    "sample_receipt": "/sample-receipt"
   },
   "usage_for_agents": [
     "Start at /goal if you are deciding whether this service fits your failure.",
@@ -138,6 +172,7 @@ GOAL_SPEC = {
     "currency": "jpy",
     "unit": "1 technical failure"
   },
+  "sample_receipt_url": f"{BASE_URL}/sample-receipt",
   "input_contract": {
     "required": [
       "failing_command_or_request",
@@ -338,11 +373,15 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path in ("/.well-known/agentic-commerce.json", "/agent.json"):
-            self._send_json(200, AGENT_METADATA)
+            self._send_json(200, AG_METADATA if 'AG_METADATA' in globals() else AGENT_METADATA)
             return
 
         if path == "/goal":
             self._send_json(200, GOAL_SPEC)
+            return
+
+        if path == "/sample-receipt":
+            self._send_json(200, SAMPLE_RECEIPT)
             return
 
         if path in ("/payment-link", "/buy"):
