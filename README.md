@@ -220,6 +220,9 @@ Stable autonomous runtime confirmed.
 
 # For AI Agents
 
+## OpenClaw Instructions
+Specific instructions for the OpenClaw agent to use this service can be found in [OPENCLAW_INSTRUCTIONS.md](OPENCLAW_INSTRUCTIONS.md).
+
 ## Service Purpose
 AgentOS-KGNINJA / Factory OS provides a structured AI-agent diagnosis API and a self-healing runtime foundation. It is designed to be a queue-oriented repair gateway that AI agents can use to diagnose infrastructure and runtime errors.
 
