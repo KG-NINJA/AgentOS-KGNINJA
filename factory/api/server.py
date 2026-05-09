@@ -4,6 +4,7 @@ import socketserver
 import json
 import os
 import time
+from urllib.parse import urlparse
 from http.server import SimpleHTTPRequestHandler
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -141,19 +142,22 @@ class Handler(SimpleHTTPRequestHandler):
             return None
 
     def do_GET(self):
-        if self.path == "/":
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+
+        if path == "/":
             self.path = "/index.html"
             return super().do_GET()
 
-        if self.path.startswith("/static/"):
+        if path.startswith("/static/"):
             self.path = self.path[len("/static"):]
             return super().do_GET()
 
-        if self.path == "/health":
+        if path == "/health":
             self._send_json(200, {"status": "ok"})
             return
 
-        if self.path == "/.well-known/ai-capabilities.json":
+        if path == "/.well-known/ai-capabilities.json":
             self._send_json(200, {
                 "name": "AgentOS-KGNINJA",
                 "description": "Self-healing queue runtime and AI-agent repair gateway.",
@@ -170,7 +174,7 @@ class Handler(SimpleHTTPRequestHandler):
             })
             return
 
-        if self.path == "/status":
+        if path == "/status":
             payload = {
                 "incoming": _count_dir(_queue_path("incoming")),
                 "leased": _count_dir(_queue_path("leased")),
@@ -183,8 +187,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._send_json(200, payload)
             return
 
-        if self.path.startswith("/job/"):
-            job_id = self.path[len("/job/"):].strip()
+        if path.startswith("/job/"):
+            job_id = path[len("/job/"):].strip()
             if not job_id:
                 self._send_json(400, {"error": "missing_job_id"})
                 return
@@ -277,7 +281,10 @@ class Handler(SimpleHTTPRequestHandler):
         }
 
     def do_POST(self):
-        if self.path == "/api/diagnose":
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+
+        if path == "/api/diagnose":
             payload = self._read_json()
             if not isinstance(payload, dict):
                 self._send_json(400, {"error": "invalid_json"})
@@ -292,7 +299,7 @@ class Handler(SimpleHTTPRequestHandler):
             self._send_json(200, diagnosis)
             return
 
-        if self.path != "/build":
+        if path != "/build":
             self._send_json(404, {"error": "not_found"})
             return
 
