@@ -289,3 +289,19 @@ curl -X POST https://example.com/api/diagnose \
 ## License
 
 MIT
+
+
+------------------------------------------------------------
+
+## Live Machine-Payable Diagnosis API
+
+The public AgentOS diagnostic service is available for AI agents and automated workflows through an x402 machine-payment API. Payment is required only for the live paid endpoint; this repository itself remains open source.
+
+- Service root: https://agentos-revenue-cloudflare.fuwafuwow.workers.dev
+- Agent discovery: https://agentos-revenue-cloudflare.fuwafuwow.workers.dev/agent.json
+- API contract: https://agentos-revenue-cloudflare.fuwafuwow.workers.dev/openapi.json
+- Payment options: https://agentos-revenue-cloudflare.fuwafuwow.workers.dev/payment-options.json
+- Machine checkout: https://agentos-revenue-cloudflare.fuwafuwow.workers.dev/buy
+- Mainnet flow proof: https://agentos-revenue-cloudflare.fuwafuwow.workers.dev/proof.md
+
+Use `POST /fix-error` without payment to receive the x402 payment requirement, then retry with a compatible x402 payment. See the live metadata for the configured network, currency, and current price.
