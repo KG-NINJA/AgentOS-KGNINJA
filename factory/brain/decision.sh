@@ -16,6 +16,33 @@ structured_flag() {
   fi
 }
 
+swarm_feedback_flag() {
+  if [ -x "$CONFIG_GET" ]; then
+    "$CONFIG_GET" swarm_artifact_feedback_enabled false
+  else
+    echo "false"
+  fi
+}
+
+record_swarm_feedback() {
+  local goal_id="$1" event_name="$2" subject="$3" notes="$4" source_ref="$5"
+  if [ "$(swarm_feedback_flag)" != "true" ]; then
+    return 0
+  fi
+  if ! python3 -m factory.swarm.cli \
+      --db "$ROOT/runtime/swarm/swarm.db" \
+      record-goal-signal \
+      --goal-id "$goal_id" \
+      --event "$event_name" \
+      --subject "$subject" \
+      --notes "$notes" \
+      --source-ref "$source_ref" \
+      >> "$ROOT/runtime/swarm_feedback.log" 2>&1; then
+    printf '%s SWARM_FEEDBACK status=warn goal=%s event=%s\n' \
+      "$(date -Is)" "$goal_id" "$event_name" >> "$ACTIVITY_LOG"
+  fi
+}
+
 next_project_dir() {
   mkdir -p "$ROOT/workspace"
   local highest=0
@@ -49,7 +76,7 @@ PY
 }
 
 run_structured_pipeline() {
-  local queue_file intent_spec architecture_file project_dir critique_file memory_log
+  local queue_file intent_spec architecture_file project_dir critique_file memory_log goal_id project_name
   queue_file="$(find "$QUEUE_DIR" -maxdepth 1 -type f -name '*.md' | sort | head -n 1 || true)"
   if [ -z "$queue_file" ]; then
     echo "structured: no queue markdown found" >&2
@@ -61,13 +88,30 @@ run_structured_pipeline() {
   project_dir="$(next_project_dir)"
   critique_file="$ROOT/runtime/critique_report.md"
   memory_log="$ROOT/memory/log-$(date +%Y%m%d).md"
+  goal_id="$(basename "$queue_file" .md)"
 
   rm -f "$STRUCTURED_STATE_FILE"
 
   "$ROOT/factory/roles/planner.sh" "$queue_file" "$intent_spec"
   "$ROOT/factory/roles/architect.sh" "$intent_spec" "$architecture_file"
   "$ROOT/factory/roles/builder.sh" "$architecture_file" "$project_dir"
+  project_name="$(basename "$project_dir")"
+  record_swarm_feedback \
+    "$goal_id" "artifact_generated" "$project_name" \
+    "Structured builder produced a project artifact." \
+    "agentos2://structured/$goal_id/builder"
   "$ROOT/factory/roles/critic.sh" "$project_dir" "$critique_file"
+  if grep -q -- '- None detected' "$critique_file"; then
+    record_swarm_feedback \
+      "$goal_id" "critic_pass" "$project_name" \
+      "Structured critic reported no blocking issues." \
+      "agentos2://structured/$goal_id/critic"
+  else
+    record_swarm_feedback \
+      "$goal_id" "critic_fail" "$project_name" \
+      "Structured critic reported one or more issues; the failure is retained." \
+      "agentos2://structured/$goal_id/critic"
+  fi
   "$ROOT/factory/roles/reflector.sh" "$critique_file" "$memory_log"
 
   cat > "$STRUCTURED_STATE_FILE" <<EOF

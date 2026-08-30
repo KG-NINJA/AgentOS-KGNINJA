@@ -22,3 +22,7 @@ jobs:
       - name: Python syntax checks
         run: |
           find factory diagnostics evolution_eval -type f -name "*.py" -print0 | xargs -0 python3 -m py_compile
+
+      - name: Luna swarm research tests
+        run: |
+          python3 -m unittest discover -s factory/swarm/tests -p 'test_*.py' -v

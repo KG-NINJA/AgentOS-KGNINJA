@@ -190,6 +190,24 @@ bash factory.sh selftest
 
 ------------------------------------------------------------
 
+## Luna Swarm Research Extension
+
+AgentOS2 now includes an append-only Swarm Artifact Environment for
+artifact-mediated prediction research. It preserves the existing queue and
+planner/builder/critic runtime while adding 50-worker homogeneous bootstrap,
+lineage, automatic maturity evaluation, evidence-cluster anti-herding,
+emergent-specialization detection, matched baselines, deny-by-default x402
+product routes, and deterministic paper-trading gates.
+
+Production Luna inference, live outcome data, x402 settlement, paper trading,
+and real execution are not enabled by default. See
+[`docs/luna-swarm-revenue-strategy.md`](docs/luna-swarm-revenue-strategy.md) for
+the exact implemented and closed boundaries.
+
+
+
+------------------------------------------------------------
+
 ## Philosophy
 
 Most coding agents operate interactively:

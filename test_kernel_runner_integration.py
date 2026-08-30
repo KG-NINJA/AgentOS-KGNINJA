@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 
-ROOT = "/home/user/kg-autonomous"
+ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC_RUNNER = os.path.join(ROOT, "evolution_eval", "kernel_runner.sh")
 SRC_ORCHESTRATOR = os.path.join(ROOT, "evolution_eval", "kernel_orchestrator.py")
 

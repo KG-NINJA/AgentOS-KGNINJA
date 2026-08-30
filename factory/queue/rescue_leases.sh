@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/home/user/kg-autonomous"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LEASED="$ROOT/queue/leased"
 INCOMING="$ROOT/queue/incoming"
 TIMEOUT="${LEASE_TIMEOUT_SEC:-1800}"
