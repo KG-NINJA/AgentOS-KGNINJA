@@ -3,13 +3,20 @@ import http.server
 import socketserver
 import json
 import os
+import sys
 import time
 from http.server import SimpleHTTPRequestHandler
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from factory.swarm.http_api import default_router
+
 STATIC_ROOT = os.path.join(ROOT, "factory", "api", "static")
 HOST = "127.0.0.1"
 PORT = 8787
+SWARM_ROUTER = default_router(ROOT)
 
 
 def _runtime_path(*parts):
@@ -118,11 +125,23 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=STATIC_ROOT, **kwargs)
 
-    def _send_json(self, code, payload):
+    def _send_json(self, code, payload, headers=None):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_text(self, code, payload, content_type="text/plain; charset=utf-8", headers=None):
+        body = payload.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -161,11 +180,16 @@ class Handler(SimpleHTTPRequestHandler):
                     "diagnosis",
                     "repair-guidance",
                     "queue-processing",
-                    "crash-recovery"
+                    "crash-recovery",
+                    "stigmergic-artifact-research",
+                    "x402-intelligence-discovery"
                 ],
                 "public_api": {
                     "health": "/health",
-                    "diagnose": "/api/diagnose"
+                    "diagnose": "/api/diagnose",
+                    "swarm_status": "/swarm/status",
+                    "agent_discovery": "/.well-known/agent.json",
+                    "x402_discovery": "/.well-known/x402/discovery/resources"
                 }
             })
             return
@@ -200,6 +224,23 @@ class Handler(SimpleHTTPRequestHandler):
                     "message": message,
                 },
             )
+            return
+
+        swarm_response = SWARM_ROUTER.handle_get(self.path, self.headers)
+        if swarm_response is not None:
+            if isinstance(swarm_response.body, str):
+                self._send_text(
+                    swarm_response.status,
+                    swarm_response.body,
+                    swarm_response.content_type,
+                    swarm_response.headers,
+                )
+            else:
+                self._send_json(
+                    swarm_response.status,
+                    swarm_response.body,
+                    swarm_response.headers,
+                )
             return
 
         self._send_json(404, {"error": "not_found"})

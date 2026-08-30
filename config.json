@@ -4,5 +4,11 @@
   "open_md_pipeline_shadow_mode": true,
   "clarify_gate_mode": "warn_continue",
   "clarify_hybrid_min_confidence": 0.3,
-  "default_artifact_target": "web_app"
+  "default_artifact_target": "web_app",
+  "swarm_artifact_feedback_enabled": true,
+  "swarm_worker_count": 50,
+  "swarm_real_money_enabled": false,
+  "swarm_paper_trading_enabled": false,
+  "swarm_x402_settlement_enabled": false,
+  "swarm_real_execution_enabled": false
 }

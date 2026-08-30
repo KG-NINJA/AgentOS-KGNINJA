@@ -6,6 +6,9 @@ import os
 import unittest
 
 
+ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
 class ModularIntegrityTests(unittest.TestCase):
     def test_modules_import(self):
         for name in [
@@ -19,7 +22,7 @@ class ModularIntegrityTests(unittest.TestCase):
             self.assertIsNotNone(mod)
 
     def test_analyze_has_no_statistical_formulas(self):
-        path = os.path.join("/home/user/kg-autonomous", "evolution_eval", "analyze.py")
+        path = os.path.join(ROOT, "evolution_eval", "analyze.py")
         with open(path, "r", encoding="utf-8") as fh:
             text = fh.read()
         # analyze.py should orchestrate only, not embed formulas.

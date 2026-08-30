@@ -11,6 +11,9 @@ from evolution_eval.reproducibility import build_repro_report
 from evolution_eval.sensitivity import run_sensitivity_sweep
 
 
+ROOT = Path(__file__).resolve().parent
+
+
 class ReproducibilityArtifactTests(unittest.TestCase):
     def _write_jsonl(self, path: Path, rows):
         with path.open("w", encoding="utf-8") as fh:
@@ -26,8 +29,8 @@ class ReproducibilityArtifactTests(unittest.TestCase):
             self._write_jsonl(k, rows)
 
             modules = [
-                "/home/user/kg-autonomous/evolution_eval/analyze.py",
-                "/home/user/kg-autonomous/evolution_eval/stats_core.py",
+                str(ROOT / "evolution_eval" / "analyze.py"),
+                str(ROOT / "evolution_eval" / "stats_core.py"),
             ]
             cfg = {"a": 1, "b": True}
             r1 = build_repro_report(config=cfg, input_files=[str(b), str(k)], module_files=modules, seed=42, sweep_payload=None)
@@ -54,7 +57,7 @@ class ReproducibilityArtifactTests(unittest.TestCase):
             build_analysis_result=build_analysis_result,
         )
 
-        modules = ["/home/user/kg-autonomous/evolution_eval/analyze.py"]
+        modules = [str(ROOT / "evolution_eval" / "analyze.py")]
         cfg = {"x": 1}
         with tempfile.TemporaryDirectory() as td:
             f = Path(td) / "rows.jsonl"

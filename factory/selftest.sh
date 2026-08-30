@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-JOB_ID="factory_selftest_$(date +%s)"
+# Prefix the isolated fixture so lease_one never consumes a user's queued job.
+JOB_ID="000_factory_selftest_$(date +%s)"
 JOB_NAME="${JOB_ID}.md"
 INCOMING_PATH="queue/incoming/$JOB_NAME"
 LEASED_PATH="queue/leased/$JOB_NAME"

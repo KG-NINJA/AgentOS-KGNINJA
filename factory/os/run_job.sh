@@ -23,6 +23,8 @@ VALIDATE_SCRIPT="${VALIDATE_SCRIPT:-$ROOT/factory/repair/validate.sh}"
 CODEX_FIX_SCRIPT="${CODEX_FIX_SCRIPT:-$ROOT/factory/repair/codex_fix.sh}"
 PUSH_SCRIPT="${PUSH_SCRIPT:-$ROOT/factory_git_push.sh}"
 STATE_TOOL="${STATE_TOOL:-$ROOT/factory/state/task_state.py}"
+SWARM_CLI="${SWARM_CLI:-$ROOT/factory/swarm/cli.py}"
+CONFIG_GET="${CONFIG_GET:-$ROOT/factory/scripts/config_get.py}"
 
 mkdir -p "$DONE_DIR" "$FAILED_DIR" "$RUNTIME_DIR"
 
@@ -43,6 +45,27 @@ deploy_url=""
 
 log() {
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$job_log"
+}
+
+swarm_feedback() {
+  local event_name="$1" notes="$2"
+  local enabled="false"
+  if [ -x "$CONFIG_GET" ]; then
+    enabled="$($CONFIG_GET swarm_artifact_feedback_enabled false 2>/dev/null || echo false)"
+  fi
+  if [ "$enabled" != "true" ] || [ ! -f "$SWARM_CLI" ]; then
+    return 0
+  fi
+  (cd "$ROOT" && python3 -m factory.swarm.cli \
+      --db "$ROOT/runtime/swarm/swarm.db" \
+      record-goal-signal \
+      --goal-id "$job_id" \
+      --event "$event_name" \
+      --subject "${APP_ID:-$job_id}" \
+      --notes "$notes" \
+      --source-ref "agentos2://queue/$job_id/$event_name") \
+      >> "$RUNTIME_DIR/swarm_feedback.log" 2>&1 || \
+      log "swarm feedback warning event=$event_name"
 }
 
 state_update() {
@@ -170,6 +193,7 @@ fi
 TARGET_DIR="$(resolve_target_dir "$APP_ID")"
 VALIDATE_LOG="$RUNTIME_DIR/validate_${job_id}.log"
 log "target_dir=$TARGET_DIR"
+swarm_feedback "artifact_generated" "Queue runtime produced an artifact target for deterministic validation."
 state_update "validating"
 
 if [ ! -x "$VALIDATE_SCRIPT" ]; then
@@ -188,6 +212,7 @@ if ! bash "$VALIDATE_SCRIPT" "$TARGET_DIR" "$VALIDATE_LOG" >>"$job_log" 2>&1; th
     if ! JOB_ID="$job_id" APP_ID="${APP_ID:-}" bash "$CODEX_FIX_SCRIPT" "$TARGET_DIR" "$VALIDATE_LOG" >>"$job_log" 2>&1; then
       fail_reason="codex-fix-fail"
       log "codex fix failed"
+      swarm_feedback "critic_fail" "Validation repair failed; the failed artifact remains available for analysis."
       state_update "failed" --last-error "$fail_reason"
       finalize_job_file "$FAILED_DIR"
       write_metric
@@ -204,6 +229,7 @@ if ! bash "$VALIDATE_SCRIPT" "$TARGET_DIR" "$VALIDATE_LOG" >>"$job_log" 2>&1; th
     attempts="$MAX_FIX"
     fail_reason="validate-fail"
     log "validate still failing after max attempts"
+    swarm_feedback "critic_fail" "Validation failed after the configured repair attempts."
     state_update "failed" --last-error "$fail_reason"
     finalize_job_file "$FAILED_DIR"
     write_metric
@@ -212,6 +238,8 @@ if ! bash "$VALIDATE_SCRIPT" "$TARGET_DIR" "$VALIDATE_LOG" >>"$job_log" 2>&1; th
 else
   attempts=0
 fi
+
+swarm_feedback "critic_pass" "Deterministic validation passed for the generated artifact."
 
 if [ -x "$PUSH_SCRIPT" ]; then
   state_update "pushing"
