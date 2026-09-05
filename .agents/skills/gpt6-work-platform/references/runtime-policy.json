@@ -1,0 +1,44 @@
+{
+  "schema_version": "gpt6-work-platform.v1",
+  "status": "IMPLEMENTED_OFFLINE_NOT_ACTIVATED",
+  "scope": "this_skill_and_its_explicit_local_call_path",
+  "candidate_model": "gpt-6-astra",
+  "candidate_effort": {
+    "routine_review": "low",
+    "research_synthesis": "medium",
+    "code_review": "high",
+    "architecture": "xhigh",
+    "exceptional_audit": "max"
+  },
+  "first_comparison": "preserve_effective_baseline_effort",
+  "runtime_limits": {
+    "max_read_concurrency": 3,
+    "max_transient_retries": 2,
+    "default_timeout_seconds": 15,
+    "default_max_age_seconds": 300,
+    "max_tasks": 128,
+    "default_context_budget_bytes": 24000,
+    "state_writer": "coordinator_only"
+  },
+  "promotion": {
+    "minimum_completed_distinct_pairs": 30,
+    "require_no_per_case_quality_regression": true,
+    "require_zero_safety_failures": true,
+    "minimum_operational_improvement_fraction": 0.1,
+    "require_independent_receipt_review": true,
+    "require_model_access_probe": true,
+    "require_runtime_integration_test": true,
+    "automatic_activation": false
+  },
+  "unverified_capabilities": [
+    "account_model_access",
+    "provider_native_async_tool_calling",
+    "subagent_delegation",
+    "mid_turn_steering",
+    "explicit_prompt_cache_controls"
+  ],
+  "financial_authority": false,
+  "external_side_effect_executor": null,
+  "credentials_required_for_offline_kernel": false,
+  "existing_config_and_deployments_changed": false
+}
