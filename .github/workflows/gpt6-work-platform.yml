@@ -1,16 +1,29 @@
-name: GPT-6 Work platform offline checks
+name: GPT-6 Work platform checks
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - 'AGENTS.md'
+      - 'config.json'
       - '.agents/skills/gpt6-work-platform/**'
+      - 'factory/agent/work_preflight.py'
+      - 'factory/agent/tests/test_work_preflight.py'
+      - 'factory/generator/codex_generate.sh'
+      - 'tools/build_work_skill.py'
       - '.github/workflows/gpt6-work-platform.yml'
       - 'docs/gpt6-work-platform.md'
   push:
-    branches: ['work/gpt6-platform-20260905']
+    branches: ['main', 'master', 'work/gpt6-**']
     paths:
+      - 'AGENTS.md'
+      - 'config.json'
       - '.agents/skills/gpt6-work-platform/**'
+      - 'factory/agent/work_preflight.py'
+      - 'factory/agent/tests/test_work_preflight.py'
+      - 'factory/generator/codex_generate.sh'
+      - 'tools/build_work_skill.py'
       - '.github/workflows/gpt6-work-platform.yml'
+      - 'docs/gpt6-work-platform.md'
 permissions:
   contents: read
 jobs:
@@ -23,8 +36,19 @@ jobs:
         with:
           python-version: '3.11'
       - name: Syntax
-        run: python -m py_compile .agents/skills/gpt6-work-platform/scripts/*.py
-      - name: Offline tests
+        run: |
+          python -m py_compile .agents/skills/gpt6-work-platform/scripts/*.py factory/agent/work_preflight.py tools/build_work_skill.py
+          bash -n factory/generator/codex_generate.sh
+      - name: Offline kernel tests
         run: python -m unittest discover -s .agents/skills/gpt6-work-platform/tests -v
+      - name: Generator call-path tests with a recording Codex stub
+        run: |
+          command -v jq
+          python -m unittest discover -s factory/agent/tests -p 'test_work_preflight.py' -v
       - name: Synthetic integration smoke
         run: python .agents/skills/gpt6-work-platform/scripts/smoke.py
+      - name: Reproducible Skill package
+        run: |
+          python tools/build_work_skill.py --output "$RUNNER_TEMP/skill-a.zip"
+          python tools/build_work_skill.py --output "$RUNNER_TEMP/skill-b.zip"
+          cmp "$RUNNER_TEMP/skill-a.zip" "$RUNNER_TEMP/skill-b.zip"
