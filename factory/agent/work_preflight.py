@@ -57,7 +57,7 @@ async def prepare(root: Path, run_id: str, project: str, expected_spec: bytes) -
     config = kernel.parse_json(snapshots["config.json"])
     if type(config) is not dict or any(config.get(flag) is not False for flag in FINANCE_FLAGS):
         raise kernel.Rejected("current preflight requires closed finance gates")
-    if kernel.parse_json(snapshots[paths[2]]) != expected:
+    if kernel.canonical(kernel.parse_json(snapshots[paths[2]])) != kernel.canonical(expected):
         raise kernel.Rejected("spec snapshot differs from prompt input")
     if len(snapshots[paths[0]]) > 8192:
         raise kernel.Rejected("root instructions exceed 8 KiB")

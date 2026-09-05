@@ -74,6 +74,12 @@ class PreflightTests(unittest.TestCase):
     def test_stale_snapshot_vs_prompt_rejected(self):
         with self.assertRaises(w.kernel.Rejected):
             self.prepare(raw=b'{"ai_task":"different"}')
+        # Python considers True == 1 and 1 == 1.0; the strict spec must not.
+        for expected, changed in ((1, True), (1, 1.0)):
+            snapshot = dict(self.spec, value=changed)
+            (self.root / self.project / "docs/SPEC.json").write_text(json.dumps(snapshot))
+            with self.subTest(changed=changed), self.assertRaises(w.kernel.Rejected):
+                self.prepare(raw=json.dumps(dict(self.spec, value=expected)).encode())
 
     def test_duplicate_input_key_rejected(self):
         with self.assertRaises(w.kernel.Rejected):
