@@ -72,21 +72,25 @@ def digest(value: Any) -> str:
     return hashlib.sha256(canonical(value)).hexdigest()
 
 
-def load_json(path: Path) -> Any:
+def parse_json(raw: bytes | str) -> Any:
+    """Use the same strict JSON boundary for files, stdin and stored receipts."""
+    if len(raw if isinstance(raw, bytes) else raw.encode("utf-8")) > MAX_BYTES:
+        raise Rejected("JSON byte limit")
     def pairs(items: list) -> dict:
         out: dict = {}
-        for k, v in items:
-            if k in out:
+        for key, value in items:
+            if key in out:
                 raise Rejected("duplicate JSON field")
-            out[k] = v
+            out[key] = value
         return out
-    with path.open("rb") as stream:
-        raw = stream.read(MAX_BYTES + 1)
-    if len(raw) > MAX_BYTES:
-        raise Rejected("JSON byte limit")
     value = json.loads(raw, object_pairs_hook=pairs)
     canonical(value)
     return value
+
+
+def load_json(path: Path) -> Any:
+    with path.open("rb") as stream:
+        return parse_json(stream.read(MAX_BYTES + 1))
 
 
 def identifier(value: Any) -> str:
@@ -110,7 +114,7 @@ def read_scoped(root: Path, relative: str) -> bytes:
     Secret scanning is defense in depth, not a complete secret detector.
     """
     p = Path(relative)
-    if not relative or p.is_absolute() or any(x in ("..", ".") for x in p.parts):
+    if not relative or str(p) != relative or p.is_absolute() or any(x in ("..", ".") for x in p.parts):
         raise Rejected("unsafe source path")
     if any(x.startswith(".") for x in p.parts) or p.suffix not in (".md", ".txt", ".json"):
         raise Rejected("source type not allowed")
@@ -132,7 +136,7 @@ def read_scoped(root: Path, relative: str) -> bytes:
     text = data.decode("utf-8")
     canonical(text)
     if p.suffix == ".json":
-        canonical(json.loads(text))
+        parse_json(text)
     return data
 
 
@@ -206,8 +210,18 @@ class EvidenceStore:
         os.close(fd)
         self.db = sqlite3.connect(path, timeout=10, isolation_level=None)
         self.db.execute("PRAGMA foreign_keys=ON")
-        self.db.execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, plan_hash TEXT NOT NULL, state TEXT NOT NULL, result TEXT)")
-        self.db.execute("CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, body TEXT NOT NULL)")
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, plan_hash TEXT NOT NULL, state TEXT NOT NULL, result TEXT, result_sha256 TEXT)")
+            columns = {row[1] for row in self.db.execute("PRAGMA table_info(runs)")}
+            if "result_sha256" not in columns:
+                self.db.execute("ALTER TABLE runs ADD COLUMN result_sha256 TEXT")
+            self.db.execute("CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, body TEXT NOT NULL)")
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            self.db.close()
+            raise
 
     def close(self) -> None:
         self.db.close()
@@ -215,19 +229,23 @@ class EvidenceStore:
     def claim(self, run_id: str, plan_hash: str) -> dict | None:
         self.db.execute("BEGIN IMMEDIATE")
         try:
-            row = self.db.execute("SELECT plan_hash,state,result FROM runs WHERE id=?", (run_id,)).fetchone()
+            row = self.db.execute("SELECT plan_hash,state,result,result_sha256 FROM runs WHERE id=?", (run_id,)).fetchone()
             if row:
                 if row[0] != plan_hash:
                     raise Rejected("run id reused with different plan")
                 if row[1] != "complete":
                     raise Rejected("unfinished run requires operator recovery")
-                result = json.loads(row[2])
+                result = parse_json(row[2])
+                if not row[3] or digest(result) != row[3]:
+                    raise Rejected("unverified legacy or corrupted run receipt")
+                if result.get("run_id") != run_id or result.get("plan_hash") != plan_hash:
+                    raise Rejected("receipt identity mismatch")
                 for event in result["events"]:
                     if "raw_sha256" in event:
                         self.read_blob(event["raw_sha256"])
                 self.db.execute("COMMIT")
                 return result
-            self.db.execute("INSERT INTO runs VALUES (?,?,?,NULL)", (run_id, plan_hash, "running"))
+            self.db.execute("INSERT INTO runs (id,plan_hash,state,result) VALUES (?,?,?,NULL)", (run_id, plan_hash, "running"))
             self.db.execute("COMMIT")
             return None
         except BaseException:
@@ -238,6 +256,9 @@ class EvidenceStore:
         body = canonical(result).decode("utf-8")
         self.db.execute("BEGIN IMMEDIATE")
         try:
+            row = self.db.execute("SELECT plan_hash,state FROM runs WHERE id=?", (run_id,)).fetchone()
+            if row is None or row[1] != "running" or result.get("run_id") != run_id or result.get("plan_hash") != row[0]:
+                raise Rejected("receipt does not match claimed run")
             for sha, value in blobs.items():
                 raw = canonical(value).decode("utf-8")
                 if digest(value) != sha:
@@ -245,7 +266,7 @@ class EvidenceStore:
                 self.db.execute("INSERT OR IGNORE INTO blobs VALUES (?,?)", (sha, raw))
                 if self.read_blob(sha) != value:
                     raise Rejected("existing blob mismatch")
-            changed = self.db.execute("UPDATE runs SET state='complete',result=? WHERE id=? AND state='running'", (body, run_id)).rowcount
+            changed = self.db.execute("UPDATE runs SET state='complete',result=?,result_sha256=? WHERE id=? AND state='running'", (body, digest(result), run_id)).rowcount
             if changed != 1:
                 raise Rejected("run is not claimable")
             self.db.execute("COMMIT")
@@ -257,7 +278,7 @@ class EvidenceStore:
         row = self.db.execute("SELECT body FROM blobs WHERE hash=?", (sha,)).fetchone()
         if row is None:
             raise Rejected("missing raw evidence")
-        value = json.loads(row[0])
+        value = parse_json(row[0])
         if digest(value) != sha:
             raise Rejected("corrupted raw evidence")
         return value
@@ -345,6 +366,8 @@ async def run_reads(run_id: str, tasks: list[dict], registry: Mapping[str, ReadO
             if permission_stop:
                 return {**event, "status": "skipped", "error_type": "permission_stop"}, None
             for attempt in range(retries + 1):
+                if permission_stop:
+                    return {**event, "status": "skipped", "error_type": "permission_stop"}, None
                 event["attempts"] = attempt + 1
                 try:
                     deps = {d: copy.deepcopy(raw_by_task[d]) for d in task["depends_on"]}

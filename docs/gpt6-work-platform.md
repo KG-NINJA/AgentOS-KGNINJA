@@ -1,46 +1,60 @@
-# GPT-6 Work platform integration
+# GPT-6 Work platform integration v1.1
 
-Status: **implemented and locally testable; not installed in ChatGPT and not a
-live model migration**.
+Status: **generator preflight integrated in source and tested offline; real GPT-6
+routing, ChatGPT Skill registration and external host rollout are not activated**.
 
-The additive skill at `.agents/skills/gpt6-work-platform/` provides a reusable
-orchestration contract plus a dependency-free read-only runtime kernel. It is
-intended for research, coding, files and tool-heavy work, not only finance.
+## Active source call path
 
-Read the skill's `SKILL.md` and `references/DEPLOYMENT.md` for exact behavior,
-trust assumptions, commands, integration points and rollout/rollback procedure.
+`factory/generator/codex_generate.sh` calls `factory/agent/work_preflight.py` before
+its existing Codex invocation. The preflight uses the Work kernel's bounded reads,
+strict JSON and SQLite receipts against three explicit local sources: AGENTS.md,
+config.json and the copied project SPEC.json. The snapshot must match the original
+spec string in the generation prompt. Duplicate object copies were removed from
+the prompt; the original complete spec is retained.
 
-## Repository validation
+A rejected preflight exits 78 and never reaches the model call or fallback. The
+actual generator is tested with a recording Codex stub, including rejection cases.
+No real provider request is made by those tests. The existing gpt-5.3-codex model,
+approval and sandbox flags have not been changed. Repair/parser paths have not yet
+been integrated with this preflight and must not be reported as covered.
+
+## Evidence and safety
+
+Evidence stays under runtime/work-platform (0700), in evidence.sqlite3 (0600).
+No spec/account data is committed by the code or printed to the model as raw
+preflight output. Raw source snapshots remain in the local store. Secret detection
+is heuristic; do not place credentials in project specs or instructions.
+
+The kernel now rejects duplicate keys in scoped JSON files, rejects noncanonical
+source-path aliases, hashes complete receipts, binds finalization to a claimed run,
+and cancels pending retries after a permission failure. Existing unhashed receipts
+remain unverified after the additive SQLite schema migration; use a new run ID for
+new observations, never silently rewrite historical evidence.
+
+## Validation and packaging
 
 ```sh
 python3 -m unittest discover -s .agents/skills/gpt6-work-platform/tests -v
+python3 -m unittest discover -s factory/agent/tests -p 'test_work_preflight.py' -v
 python3 .agents/skills/gpt6-work-platform/scripts/smoke.py
+python3 tools/build_work_skill.py --output /new/path/gpt6-work-platform.zip
 ```
 
-No paid API calls, external writes, account changes or transactions occur. Fixture
-tests must never be reported as actual GPT-6/baseline comparisons.
+CI runs the tests for matching changes on main/master and work/gpt6-* branches,
+for pull requests and on manual workflow dispatch. Packaging uses fixed timestamps
+and an embedded SHA-256 manifest; existing output files are never overwritten.
+The package contains the reusable Skill, not the Factory generator integration.
 
-## ChatGPT Work installation
+## Unchanged external boundaries
 
-This repository is source code, not a global ChatGPT settings interface. Package
-the `gpt6-work-platform` folder including its SKILL.md, scripts, references and
-tests. In a ChatGPT surface that exposes Skills, use Plugins > Skills > Create >
-Upload from your computer, then verify installation and a read-only invocation.
-Availability and administrative permission must be checked in the actual account.
-Do not assume installation synchronizes between desktop and web/mobile.
+A repository merge or successful CI is not a VPS deployment, account-wide Skill
+installation, provider access probe, real model comparison or financial authority.
+The Factory queue, 50-worker Swarm and finance flags remain unchanged. The existing
+generator must be updated on its actual host before that host runs this preflight.
+ChatGPT Skills require their own supported installation surface and permission.
 
-A repository checkout can expose the `.agents/skills/` directory to supporting
-coding-agent hosts. That still does not install it into ChatGPT's account-wide
-Skill catalog. The skill must be invoked/read by the host to affect a task.
-
-## Unchanged boundaries
-
-The existing Factory runtime, queue, model invocation path, `config.json`,
-50-worker Swarm configuration, economic switches, external VPS/OpenClaw services,
-Runbook and scheduled tasks are unchanged. The new maximum-three concurrency
-limit applies only to this new read executor. There is no automatic migration
-from a 50-worker Swarm and no provider-native async implementation.
-
-The production deploy workflow runs on pushes to main/master. Keep this change
-on a review branch until the deployment consequence is reviewed. The additional
-CI workflow runs offline tests only and has read-only contents permission.
+Read `.agents/skills/gpt6-work-platform/references/DEPLOYMENT.md` for exact trust
+assumptions and migration/rollback gates. Roll back the integration commit as a
+unit; removing only the kernel leaves the generator intentionally blocked. Keep
+historical evidence. No new approval, financial authority or external credentials
+are created by this implementation.
