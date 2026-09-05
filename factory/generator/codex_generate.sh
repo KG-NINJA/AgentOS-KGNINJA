@@ -221,7 +221,7 @@ echo "GENERATOR_STAGE=work_preflight_verified run_id=$run_id" >> runtime/activit
 codex_log_file="$(mktemp /tmp/codex_exec.XXXXXX.log)"
 echo "GENERATOR_STAGE=primary_codex_attempt" >> runtime/activity.log
 set +e
-codex -a never exec --sandbox workspace-write --model gpt-5.3-codex --skip-git-repo-check -C "$ROOT" "$prompt" >"$codex_log_file" 2>> runtime/generator_stderr.log
+python3 "$ROOT/factory/agent/codex_runtime.py" --role generation -- -a never exec --sandbox workspace-write --skip-git-repo-check -C "$ROOT" "$prompt" >"$codex_log_file" 2>> runtime/generator_stderr.log
 codex_rc=$?
 set -e
 echo "GENERATOR_PRIMARY_RC=$codex_rc" >> runtime/activity.log
@@ -231,7 +231,7 @@ if [ "$codex_rc" -ne 0 ]; then
   printf '%s CODEX_EXEC_FAIL rc=%s project=%s detail=%q\n' \
     "$(date -Is)" "$codex_rc" "$project_dir" "$codex_tail" >> runtime/activity.log
 
-  if [ "${FACTORY_ALLOW_CODEX_FALLBACK:-1}" = "1" ]; then
+  if [ "${FACTORY_CODEX_PROFILE:-legacy}" = "legacy" ] && [ "$codex_rc" -ne 78 ] && [ "${FACTORY_ALLOW_CODEX_FALLBACK:-1}" = "1" ]; then
     echo "GENERATOR_FALLBACK_ATTEMPT_START" >> runtime/activity.log
     echo "GENERATOR_FALLBACK_INVOCATION=deterministic" >> runtime/activity.log
     echo "GENERATOR_FALLBACK_MODEL=deterministic-scaffold" >> runtime/activity.log
