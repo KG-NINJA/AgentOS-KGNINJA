@@ -30,3 +30,14 @@ jobs:
       - name: Revenue observation and follow-up tests
         run: |
           python3 -m unittest discover -s factory/revenue/tests -v
+
+  revenue-isolation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Verify artifacts with real network isolation
+        run: python3 -m factory.revenue.control.isolation_acceptance

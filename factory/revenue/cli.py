@@ -26,6 +26,10 @@ def collect(store, source_keys, run_id, reader=None):
 
 
 def main(argv=None):
+    effective = sys.argv[1:] if argv is None else argv
+    if effective and effective[0] == "control":
+        from .control.cli import main as control_main
+        return control_main(effective[1:])
     parser = argparse.ArgumentParser(description="Observe existing revenue paths and prepare private follow-up work. No external writes.")
     parser.add_argument("--db", default="runtime/revenue/evidence.sqlite3")
     sub = parser.add_subparsers(dest="command", required=True)

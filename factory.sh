@@ -551,7 +551,7 @@ if [ -z "$cmd" ]; then
   echo "  repair" >&2
   echo "  version" >&2
   echo "  selftest" >&2
-  echo "  revenue [collect|report|next|brief|backup|stop]" >&2
+  echo "  revenue [collect|report|next|brief|backup|stop|control]" >&2
   echo "  snapshot [save|restore]" >&2
   echo "  inspect" >&2
   TRACE_STAGE="brain"
@@ -644,7 +644,7 @@ case "$cmd" in
     echo "  repair" >&2
     echo "  version" >&2
     echo "  selftest" >&2
-    echo "  revenue [collect|report|next|brief|backup|stop]" >&2
+    echo "  revenue [collect|report|next|brief|backup|stop|control]" >&2
     echo "  snapshot [save|restore]" >&2
     echo "  inspect" >&2
     TRACE_STAGE="brain"

@@ -128,6 +128,12 @@ authority. Keep captures and runtime data outside public git history.
 
 ## Storage, recovery and rollout
 
+The authenticated continuation is now implemented in
+[Revenue controller](revenue-controller.md). It uses a separate database and
+explicit owner/runner/verifier identities. The commands on this page remain
+read-only observation and internal-brief operations; they do not silently acquire
+the controller's capabilities.
+
 SQLite serializes mutations with `BEGIN IMMEDIATE`; observations, raw snapshots
 and prepared briefs are append-only. The database is created with mode 0600 in a
 private runtime subdirectory. Existing unrelated databases and symlink paths are
@@ -148,11 +154,11 @@ prices, payee, assets, Secrets and schedules are not part of this migration.
 
 To use it continuously, first review/install this commit on the authorized host,
 verify its read access, then explicitly connect one existing workflow to the
-command and verify one persisted run ID. Scheduled operation, Cloudflare
-Workers/D1 deployment, browser owner/agent consoles, authenticated approval APIs,
-budgeted job dispatch, fencing, publication and chain-verifying ledger adapters
-from the larger Revenue OS design remain separate, unimplemented integration
-work. This PR does not claim all 24 design acceptance gates have passed.
+command and verify one persisted run ID. The separate controller now supplies
+consoles, approval APIs, budgeted dispatch, fencing, publication and read-only
+receipt reconciliation, with 24 mapped P0 cases and a required CI isolation gate.
+Host installation, authenticated model execution, schedules and live account
+connections remain deployment work. Neither component deploys Workers or D1.
 
 ## Validation
 
