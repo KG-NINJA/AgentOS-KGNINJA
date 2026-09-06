@@ -551,6 +551,7 @@ if [ -z "$cmd" ]; then
   echo "  repair" >&2
   echo "  version" >&2
   echo "  selftest" >&2
+  echo "  revenue [collect|report|next|brief|backup|stop]" >&2
   echo "  snapshot [save|restore]" >&2
   echo "  inspect" >&2
   TRACE_STAGE="brain"
@@ -622,6 +623,9 @@ case "$cmd" in
   selftest)
     run_with_trace_capture "brain" "factory_cli_selftest" bash ./factory/selftest.sh "$@"
     ;;
+  revenue)
+    run_with_trace_capture "revenue" "factory_cli_revenue" python3 -m factory.revenue.cli "$@"
+    ;;
   snapshot)
     run_with_trace_capture "brain" "factory_cli_snapshot" bash ./factory-cli/snapshot.sh "$@"
     ;;
@@ -640,6 +644,7 @@ case "$cmd" in
     echo "  repair" >&2
     echo "  version" >&2
     echo "  selftest" >&2
+    echo "  revenue [collect|report|next|brief|backup|stop]" >&2
     echo "  snapshot [save|restore]" >&2
     echo "  inspect" >&2
     TRACE_STAGE="brain"

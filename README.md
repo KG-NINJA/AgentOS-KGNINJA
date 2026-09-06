@@ -204,6 +204,14 @@ and real execution are not enabled by default. See
 [`docs/luna-swarm-revenue-strategy.md`](docs/luna-swarm-revenue-strategy.md) for
 the exact implemented and closed boundaries.
 
+## Revenue observation and follow-up
+
+`bash factory.sh revenue collect` now connects bounded public service and GitHub
+observations to a private SQLite evidence store and prioritized internal work
+briefs. It separates published features from installed ones and payment claims
+from verified earnings. It does not start payments, publish applications, or
+install a schedule. See [the commands and rollout boundaries](docs/revenue-operations.md).
+
 
 
 ------------------------------------------------------------

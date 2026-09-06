@@ -26,3 +26,7 @@ jobs:
       - name: Luna swarm research tests
         run: |
           python3 -m unittest discover -s factory/swarm/tests -p 'test_*.py' -v
+
+      - name: Revenue observation and follow-up tests
+        run: |
+          python3 -m unittest discover -s factory/revenue/tests -v
