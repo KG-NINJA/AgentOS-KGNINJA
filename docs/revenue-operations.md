@@ -80,6 +80,11 @@ are labeled `host_imported_source_claim`, never authenticated settlement proof.
 Source generation time and retrieval time are separate. Reading or touching an
 old file does not refresh the underlying measurements.
 
+Every observation also retains its capture URL. The policy fingerprint binds
+the decision code and source allowlist as well as the control flags. A changed
+source URL, missing legacy capture URL or changed rules cannot reuse an old
+current-source claim or internal brief silently.
+
 The system keeps service scopes separate. It does not combine USD and USDC,
 infer an absent asset ID, treat all paid receipts as settled income, count a
 merged bounty PR as cash, or turn a mainnet asset purchase into earned revenue.

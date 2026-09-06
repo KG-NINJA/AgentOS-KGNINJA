@@ -1,5 +1,6 @@
 """Deterministic projections, not model judgement or settlement verification."""
 import re
+from pathlib import Path
 from .sources import RevenueError, SOURCES, digest, instant, json_bytes, strict_json
 
 POLICY = {
@@ -9,7 +10,9 @@ POLICY = {
     "production_changes": False, "additional_spend_cap_microusd": 0,
     "candidate_owner": "KG-NINJA",
 }
-POLICY_HASH = digest(json_bytes(POLICY))
+POLICY_HASH = digest(json_bytes({"controls": POLICY,
+    "decision_code_sha256": digest(Path(__file__).read_bytes()),
+    "sources": {key: {"url": source.url, "kind": source.kind} for key, source in SOURCES.items()}}))
 
 
 def integer(value):
@@ -31,7 +34,7 @@ def finding(code, priority, action, subject="", **details):
 
 def project(source_key, observation, now):
     source = SOURCES[source_key]
-    result = {"source_key": source_key, "url": source.url, "fresh": False,
+    result = {"source_key": source_key, "url": observation.get("source_url"), "fresh": False,
               "evidence_level": "github_provider" if source.url.startswith("https://api.github.com/")
               else "operator_reported_aggregate", "metrics": None, "findings": [],
               "snapshot_sha256": observation["snapshot_sha256"],
@@ -39,6 +42,10 @@ def project(source_key, observation, now):
     result["capture_method"] = observation.get("capture_method", "public_get")
     if result["capture_method"] == "host_import":
         result["evidence_level"] = "host_imported_source_claim"
+    if observation.get("source_url") != source.url:
+        result["findings"] = [finding("SOURCE_IDENTITY_UNVERIFIED", 5,
+            "Read the current allowlisted URL; an old or missing capture URL cannot be relabeled as a new source.")]
+        return result
     if not observation["ok"]:
         result["findings"] = [finding(observation["error"], 5, "Restore read access; retain last evidence as historical.")]
         return result

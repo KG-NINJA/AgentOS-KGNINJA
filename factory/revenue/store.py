@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS observations (
  source_key TEXT NOT NULL, snapshot_sha256 TEXT NOT NULL REFERENCES snapshots(sha256),
  fetched_at TEXT NOT NULL, source_at TEXT, ok INTEGER NOT NULL, error TEXT, retry_after REAL,
  capture_method TEXT NOT NULL DEFAULT 'public_get',
+ source_url TEXT,
  UNIQUE(run_id, source_key));
 CREATE TABLE IF NOT EXISTS tasks (
  task_key TEXT PRIMARY KEY, source_key TEXT NOT NULL, code TEXT NOT NULL,
@@ -61,6 +62,8 @@ class Store:
         self.db.executescript(SCHEMA)
         if "capture_method" not in {r[1] for r in self.db.execute("PRAGMA table_info(observations)")}:
             self.db.execute("ALTER TABLE observations ADD COLUMN capture_method TEXT NOT NULL DEFAULT 'public_get'")
+        if "source_url" not in {r[1] for r in self.db.execute("PRAGMA table_info(observations)")}:
+            self.db.execute("ALTER TABLE observations ADD COLUMN source_url TEXT")
         for table in ("snapshots", "observations", "briefs"):
             for operation in ("UPDATE", "DELETE"):
                 self.db.execute(f"CREATE TRIGGER IF NOT EXISTS {table}_no_{operation.lower()} "
@@ -108,19 +111,19 @@ class Store:
         method = record.get("capture_method", "public_get")
         if method not in ("public_get", "host_import"):
             raise RevenueError("INVALID_CAPTURE_METHOD")
-        fields = (sha, record["fetched_at"], record["source_at"], int(record["ok"]), record["error"], record["retry_after"], method)
+        fields = (sha, record["fetched_at"], record["source_at"], int(record["ok"]), record["error"], record["retry_after"], method, SOURCES[key].url)
         with self.transaction():
             old = self.db.execute("SELECT * FROM observations WHERE run_id=? AND source_key=?", (run_id, key)).fetchone()
             if old:
-                if tuple(old[k] for k in ("snapshot_sha256", "fetched_at", "source_at", "ok", "error", "retry_after", "capture_method")) != fields:
+                if tuple(old[k] for k in ("snapshot_sha256", "fetched_at", "source_at", "ok", "error", "retry_after", "capture_method", "source_url")) != fields:
                     raise RevenueError("IDEMPOTENCY_CONFLICT")
                 return old["observation_id"]
             run = self.db.execute("SELECT state FROM runs WHERE run_id=?", (run_id,)).fetchone()
             if not run or run["state"] != "RUNNING":
                 raise RevenueError("RUN_NOT_ACTIVE")
             self.db.execute("INSERT OR IGNORE INTO snapshots VALUES(?,?)", (sha, raw))
-            return self.db.execute("INSERT INTO observations(run_id,source_key,snapshot_sha256,fetched_at,source_at,ok,error,retry_after,capture_method) "
-                                   "VALUES(?,?,?,?,?,?,?,?,?)", (run_id, key, *fields)).lastrowid
+            return self.db.execute("INSERT INTO observations(run_id,source_key,snapshot_sha256,fetched_at,source_at,ok,error,retry_after,capture_method,source_url) "
+                                   "VALUES(?,?,?,?,?,?,?,?,?,?)", (run_id, key, *fields)).lastrowid
 
     def finish(self, run_id):
         with self.transaction():
@@ -161,7 +164,8 @@ class Store:
                     try:
                         metrics, _ = normalize(SOURCES[key].kind, strict_json(observation["raw"]))
                         current["last_known_observation"] = {"source_at": observation["source_at"],
-                            "fetched_at": observation["fetched_at"], "metrics": metrics, "historical_only": True}
+                            "fetched_at": observation["fetched_at"], "source_url": observation.get("source_url"),
+                            "metrics": metrics, "historical_only": True}
                     except (KeyError, TypeError, AttributeError, RevenueError, ValueError):
                         pass  # Invalid historical bodies remain raw evidence, never financial values.
                 # Retain previous good evidence as history; never add a snapshot to revenue totals.
@@ -169,6 +173,7 @@ class Store:
                 if previous:
                     old = project(key, previous, instant(previous["fetched_at"]))
                     current["previous_observation"] = {"source_at": old["source_at"], "metrics": old["metrics"],
+                                                       "source_url": old["url"],
                                                        "historical_only": True}
                     if current["fresh"] and old["fresh"] and key in ("avu_stats", "commerce_integrity"):
                         field = "settled_revenue_atoms" if key == "avu_stats" else "reported_external_payment_count"

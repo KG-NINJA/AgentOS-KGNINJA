@@ -6,12 +6,13 @@ from pathlib import Path
 from contextlib import redirect_stderr
 import copy
 import io
+import importlib.util
 import sqlite3
 import tempfile
 import unittest
 import urllib.error
 from factory.revenue.cli import collect, validate_capture
-from factory.revenue.policy import POLICY, atoms, normalize, project
+from factory.revenue.policy import POLICY, POLICY_HASH, atoms, normalize, project
 from factory.revenue.sources import (MAX_BYTES, NoRedirect, PublicReader, RevenueError,
                                      SOURCES, Source, collect_one, digest, failure,
                                      instant, json_bytes, stamp, strict_json)
@@ -156,6 +157,34 @@ class RevenueTests(unittest.TestCase):
         self.assertIsNone(report["metrics"])
         self.assertEqual(report["last_known_observation"]["metrics"]["settled_revenue_atoms"], "0")
         self.assertTrue(report["last_known_observation"]["historical_only"])
+
+    def test_capture_url_cannot_be_reinterpreted_as_a_different_source(self):
+        self.record("avu_health", health())
+        record = self.store.latest("avu_health")
+        self.assertEqual(record["source_url"], SOURCES["avu_health"].url)
+        for url in (None, "https://different.invalid/health"):
+            record["source_url"] = url
+            result = project("avu_health", record, instant(stamp()))
+            self.assertFalse(result["fresh"])
+            self.assertEqual(result["findings"][0]["code"], "SOURCE_IDENTITY_UNVERIFIED")
+
+    def test_policy_fingerprint_includes_rules_and_source_identity(self):
+        from factory.revenue import policy
+        from unittest.mock import patch
+        candidate = Path(self.temp.name) / "candidate_policy.py"
+        original = Path(policy.__file__).read_text()
+        def load_candidate(text):
+            candidate.write_text(text)
+            spec = importlib.util.spec_from_file_location("factory.revenue.candidate_policy", candidate)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+        self.assertEqual(load_candidate(original).POLICY_HASH, POLICY_HASH)
+        changed = load_candidate(original.replace('"COST_BASIS_EXPIRED"', '"COST_BASIS_RULE_CHANGED"'))
+        self.assertEqual(changed.POLICY, POLICY)
+        self.assertNotEqual(changed.POLICY_HASH, POLICY_HASH)
+        with patch.dict(SOURCES, {"avu_health": Source("avu_health", "avu_health", "https://changed.invalid/health")}):
+            self.assertNotEqual(load_candidate(original).POLICY_HASH, POLICY_HASH)
 
     def test_failed_read_retains_history_but_not_current_metrics(self):
         self.record("commerce_integrity", integrity())
