@@ -85,6 +85,22 @@ class PublisherVerification(unittest.TestCase):
 
 
 class MatchingAndRecovery(ControllerFixture):
+    def test_kill_switch_blocks_pending_verifier_then_owner_can_cancel(self):
+        job = self.completed()
+        self.call("owner_approver", "stop", {"reason": "OWNER_STOP"})
+        with self.assertRaisesRegex(ControlError, "RUNTIME_STOPPED"):
+            self.c.verify(ACTORS["verifier"], envelope("verify-stopped", {"job_id": job["job_id"]}))
+        self.call("owner_approver", "cancel-job", {"job_id": job["job_id"], "review_ref": "fixture-cancellation"})
+        self.call("reconciler", "cost", {"reservation_id": job["job_id"], "actual": {"cash": 0, "work": 1, "human": 1}, "evidence_ref": "fixture-cancelled-cost"})
+        self.assertTrue(self.resume()["enabled"])
+
+    def test_unclaimed_expired_job_does_not_hold_slot_forever(self):
+        self.admit()
+        self.now += 121
+        self.call("safety_monitor", "expire", {})
+        self.assertEqual(self.c.db.one("SELECT state FROM rc_jobs")["state"], "EXPIRED")
+        self.assertEqual(self.c.db.one("SELECT state FROM rc_reservations")["state"], "UNKNOWN")
+
     def test_matching_explicit_capabilities_and_unknown_cost(self):
         demand = {"languages": ["Python"], "max_cash_microusd": 0, "max_work_minutes": 2, "max_human_minutes": 1, "max_results": 5}
         result = self.call("agent_operator", "match", demand)

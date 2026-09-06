@@ -26,7 +26,10 @@ for argv in request['checks']:
     try:
         log = pathlib.Path('/work/log.txt')
         with log.open('wb') as out:
-            run = subprocess.run(argv, cwd=root, env={'PATH':'/usr/bin:/bin','HOME':'/work','LANG':'C.UTF-8','PYTHONDONTWRITEBYTECODE':'1'}, stdout=out, stderr=subprocess.STDOUT, timeout=request['check_timeout'])
+            # The trusted harness owns the immutable project and log. Project
+            # code runs as another UID and cannot replace tests or signal the
+            # harness. No credentials are present in either process.
+            run = subprocess.run(argv, cwd=root, user=65534, group=65534, extra_groups=(), env={'PATH':'/usr/bin:/bin','HOME':'/tmp','LANG':'C.UTF-8','PYTHONDONTWRITEBYTECODE':'1'}, stdout=out, stderr=subprocess.STDOUT, timeout=request['check_timeout'])
         results.append({'argv':argv,'exit_code':run.returncode,'log':log.read_bytes()[:64000].decode('utf-8','replace')})
     except Exception as e:
         results.append({'argv':argv,'exit_code':None,'error':type(e).__name__})
@@ -99,8 +102,8 @@ class DockerSandbox:
 
     def command(self, image, name, inputs, checks, timeout):
         argv = [self.binary, "run", "--pull=never", "--rm", "--name", name, "--network=none", "--read-only",
-                "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=64", "--memory=512m", "--cpus=1",
-                "--user=65534:65534", "--ulimit", "fsize=1048576:1048576", "--ulimit", "nofile=128:128",
+                "--cap-drop=ALL", "--cap-add=SETUID", "--cap-add=SETGID", "--security-opt=no-new-privileges", "--pids-limit=64", "--memory=512m", "--cpus=1",
+                "--user=0:0", "--ulimit", "fsize=1048576:1048576", "--ulimit", "nofile=128:128",
                 "--tmpfs", "/work:rw,noexec,nosuid,nodev,size=128m,mode=1777", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777"]
         for host, target in [("/usr", "/usr"), ("/lib", "/lib"), ("/lib64", "/lib64"), ("/bin", "/bin"), (str(inputs), "/input"), (str(checks), "/checks")]:
             if Path(host).exists():
@@ -147,7 +150,7 @@ class DockerSandbox:
 class ArtifactVerifier:
     def __init__(self, profiles, sandbox=None):
         self.profiles, self.sandbox = profiles, sandbox or DockerSandbox()
-        self.fingerprint = digest(json_bytes({"profiles": profiles, "code": digest(Path(__file__).read_bytes()), "backend": "docker-readonly-network-none-v1"}))
+        self.fingerprint = digest(json_bytes({"profiles": profiles, "code": digest(Path(__file__).read_bytes()), "backend": "docker-readonly-network-none-uid-separated-v2"}))
 
     def verify(self, job, artifact, profile_key):
         profile = self.profiles.get(profile_key)

@@ -25,6 +25,7 @@ def run():
 sys.path.insert(0, '.')
 from src.value import value
 assert value == 2, 'baseline behavior regressed'
+assert os.geteuid() == 65534
 assert 'KG_REVENUE_SECRET_CANARY' not in os.environ
 assert not pathlib.Path(HOST_SECRET).exists()
 assert not pathlib.Path('/root').exists()
@@ -34,6 +35,19 @@ except OSError:
     pass
 else:
     raise AssertionError('verifier is writable')
+for target in ('tests/check.py', 'src/value.py'):
+    try:
+        pathlib.Path(target).write_text('runtime tampering')
+    except OSError:
+        pass
+    else:
+        raise AssertionError('runtime modification of protected project')
+try:
+    os.kill(os.getppid(), 0)
+except PermissionError:
+    pass
+else:
+    raise AssertionError('project can signal verifier')
 try:
     s = socket.create_connection(('1.1.1.1', 443), timeout=1)
 except OSError:
@@ -70,7 +84,8 @@ print('isolated behavior, readonly harness, hidden host data and network denial 
             else:
                 os.environ["KG_REVENUE_SECRET_CANARY"] = original
         return {"synthetic": True, "real_isolation": "docker-network-none", "valid_patch": "PASS", "regression_patch": "REJECTED",
-                "baseline_replacement": "REJECTED", "host_secret": "INACCESSIBLE", "network": "DENIED", "harness": "READ_ONLY"}
+                "baseline_replacement": "REJECTED", "runtime_test_tampering": "DENIED", "harness_signal": "DENIED",
+                "host_secret": "INACCESSIBLE", "network": "DENIED", "harness": "READ_ONLY_UID_SEPARATED"}
 
 
 if __name__ == "__main__":

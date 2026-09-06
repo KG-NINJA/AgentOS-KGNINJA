@@ -32,6 +32,13 @@ local image is created, then only the system runtime and prepared inputs are
 mounted read-only. No host home, control database, credential, SSH socket or
 Docker socket is mounted into the container.
 
+The trusted harness owns the prepared project and test files. It has only the
+two identity-switching capabilities needed to start project checks under UID
+65534; project processes lose those capabilities. They cannot rewrite baseline
+tests during execution, replace the harness's log file or signal the harness.
+Only scratch under `/tmp` is writable by project checks. Builds that require
+writing into the project tree need a separately reviewed profile.
+
 For an authorized host installation, copy the example config to a private path,
 configure only reviewed capabilities, and provision separate credentials. Keep
 the config and credential files mode 0600; each actor has exactly one role and a
@@ -89,6 +96,7 @@ role, source instruction saying “approved”, runner test status or payment fl
 | POST `observe` | collector | Append schema-valid observation and exact source bytes |
 | POST `match`, `propose`, `admit` | agent_operator | Match explicit engineering capabilities; propose work; reserve an approved job |
 | POST `approve`, `revoke`, `budget`, `resume` | owner_approver | Bind exact authority, limits, evidence and expiry |
+| POST `cancel-job` | owner_approver | Cancel a pending/running job, advance its fence, require cost reconciliation |
 | POST `claim`, `heartbeat`, `result` | runner | Claim one bounded job, maintain lease, submit untrusted artifacts |
 | POST `verify` | verifier | Run host-pinned checks through the isolation adapter |
 | POST `execute` | publisher | One owner-approved comment or Draft PR attempt |
@@ -247,11 +255,17 @@ allocation. Native assets are never added together or treated as USD implicitly.
 
 ## Stop, restore and remaining production gates
 
-`stop` blocks new proposals/admissions/sends and runner heartbeats; active host
+`stop` blocks new proposals/admissions/sends/verifier starts and runner heartbeats; active host
 executors must honor lease loss. Reconciliation remains available. Only the owner
 can resume after current policy review, with no unknown costs/effects or active
 budget overrun. Invoke `expire` from the installed safety monitor; no monitoring
 daemon is silently registered by this PR.
+
+Unknown cost by itself blocks new commitments while an already approved verifier
+finishes within the job deadline. An explicit stop also blocks that verifier.
+The owner can cancel the job with `job_id` and `review_ref`, reconcile costs and
+then resume. Queued and verification-pending jobs expire too, preventing an
+abandoned job from holding the single execution slot indefinitely.
 
 ```sh
 python3 -m factory.revenue.cli control backup \

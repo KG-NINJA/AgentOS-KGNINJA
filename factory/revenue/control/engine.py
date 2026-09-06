@@ -369,13 +369,16 @@ class Controller:
         self.db.sql.execute("UPDATE rc_jobs SET state=?,result_sha=?,result=? WHERE id=?", (state, digest(json_bytes(result)), json_bytes(result), j["id"]))
         # Runner estimates are never treated as audited actual costs.
         self.db.sql.execute("UPDATE rc_reservations SET state='UNKNOWN' WHERE id=?", (j["reservation_id"],))
-        self._stop("COST_RECONCILIATION_REQUIRED")
+        # Unknown cost blocks new commitments through _running(), while the
+        # already budgeted verifier can finish. An explicit owner stop is retained.
         return {"job_id": j["id"], "state": state, "cost_state": "UNKNOWN"}
 
     def op_expire(self, actor, p, identity):
         role(actor, "safety_monitor", "owner_approver")
         fields(p, ())
-        jobs = self.db.all("SELECT * FROM rc_jobs WHERE state='RUNNING' AND lease_until<=?", (self.clock(),))
+        jobs = [j for j in self.db.all("SELECT * FROM rc_jobs WHERE state IN ('QUEUED','RUNNING','VERIFYING','VERIFY_PENDING')")
+                if instant(decode(j, "body")["expires_at"]) <= self.clock() or
+                (j["state"] == "RUNNING" and j["lease_until"] <= self.clock())]
         for job in jobs:
             self.db.sql.execute("UPDATE rc_jobs SET state='EXPIRED',fence=fence+1 WHERE id=?", (job["id"],))
             self.db.sql.execute("UPDATE rc_reservations SET state='UNKNOWN' WHERE id=?", (job["reservation_id"],))
@@ -422,6 +425,7 @@ class Controller:
     def op_verification_start(self, actor, p, identity):
         role(actor, "verifier")
         fields(p, ("job_id",))
+        require(self.db.one("SELECT enabled FROM rc_runtime")["enabled"] == 1, "RUNTIME_STOPPED")
         require(self.verifier is not None, "VERIFIER_UNAVAILABLE", 503)
         j = self.db.one("SELECT j.*,p.actor AS proposer FROM rc_jobs j JOIN rc_proposals p ON p.id=j.proposal_id WHERE j.id=?", (p["job_id"],))
         require(j and j["state"] == "VERIFY_PENDING", "NOT_READY_FOR_VERIFICATION")
@@ -566,3 +570,14 @@ class Controller:
     def op_match(self, actor, p, identity):
         from .matching import match
         return match(self, actor, p)
+
+    def op_cancel_job(self, actor, p, identity):
+        role(actor, "owner_approver")
+        fields(p, ("job_id", "review_ref"))
+        text(p["review_ref"], 500)
+        j = self.db.one("SELECT * FROM rc_jobs WHERE id=?", (p["job_id"],))
+        require(j and j["state"] in ("QUEUED", "RUNNING", "VERIFY_PENDING", "VERIFYING"), "JOB_NOT_CANCELLABLE")
+        self.db.sql.execute("UPDATE rc_jobs SET state='CANCELLED',fence=fence+1,lease_until=NULL WHERE id=?", (j["id"],))
+        self.db.sql.execute("UPDATE rc_reservations SET state='UNKNOWN' WHERE id=?", (j["reservation_id"],))
+        self._stop("OWNER_JOB_CANCELLED_RECONCILE_COST")
+        return {"job_id": j["id"], "state": "CANCELLED", "host_runner_must_terminate": True}
