@@ -52,6 +52,7 @@ jobs:
           command -v jq
           python -m unittest discover -s factory/agent/tests -p 'test_work_preflight.py' -v
           python -m unittest discover -s factory/agent/tests -p 'test_codex_runtime.py' -v
+          python -m unittest discover -s factory/agent/tests -p 'test_gpt6_evaluation.py' -v
       - name: Synthetic integration smoke
         run: python .agents/skills/gpt6-work-platform/scripts/smoke.py
       - name: Reproducible Skill package

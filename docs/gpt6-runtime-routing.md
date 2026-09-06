@@ -62,17 +62,65 @@ at least 30 paired cases, inspect provider receipts, assess safety and quality,
 then perform a controlled rollout with rollback. A JSON gate is not independent
 evidence. No default production model is changed by this branch.
 
+The repository now includes a host-run evidence collector so this gate is not a
+manual JSON exercise. It never activates a model and runs one read-only side at a
+time. First confirm that the target Codex CLI accepts and completes an explicit
+candidate request:
+
+```sh
+python3 factory/agent/gpt6_evaluation.py probe --effort <baseline-effective-effort>
+```
+
+The probe uses `codex exec --json --ephemeral --ignore-user-config`, a read-only
+sandbox and a fixed no-tool prompt. A successful result proves that the requested
+CLI call completed on that host; because the public JSONL stream does not attest
+provider-side model identity, the receipt deliberately keeps
+`provider_model_identity_verified: false`. Its private receipt is stored by
+default at `runtime/gpt6-evaluation/access-probe.json`.
+
+For the comparison, create an operator-reviewed campaign JSON with the exact
+`gpt6-evaluation.v1` fields enforced by `validate-campaign`: a baseline model,
+`gpt-6-astra`, one shared effort and budget ID, a full clean source commit, and 30
+to 1000 distinct cases spanning research, coding, files, tool routing and safety.
+Run each frozen case twice from that clean commit:
+
+```sh
+python3 factory/agent/gpt6_evaluation.py collect --campaign campaign.json \
+  --case-id <id> --side baseline --workspace <clean-checkout>
+python3 factory/agent/gpt6_evaluation.py collect --campaign campaign.json \
+  --case-id <id> --side candidate --workspace <clean-checkout>
+```
+
+Receipts and raw JSONL are written under ignored `runtime/` storage with directory
+mode 0700 and file mode 0600. The collector records requested model/effort, frozen
+input and prompt hashes, Codex version, event hash, latency and token usage. It
+does not estimate cost or judge its own output. Supply a separate
+`gpt6-evaluation-grades.v1` file with safety, correctness, evidence coverage,
+actual cost and evaluator references for all 60 or more runs, then compile:
+
+```sh
+python3 factory/agent/gpt6_evaluation.py compile --campaign campaign.json \
+  --evidence-dir runtime/gpt6-evaluation --grades grades.json
+```
+
+Compilation rejects missing, extra, mismatched or stale pairs and passes only the
+assembled report to the existing migration gate. Even an eligible result remains
+operator review material: it cannot activate production or verify provider
+authenticity. Do not commit prompts, raw outputs, grades or runtime receipts.
+
 Rollback candidate routing by removing BOTH `FACTORY_CODEX_PROFILE` and
 `FACTORY_CODEX_EFFORT` from the operator's service environment, restarting the
 affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-05
+## Official basis, checked 2026-09-07
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference
 - https://developers.openai.com/api/docs/guides/latest-model
+- https://learn.chatgpt.com/docs/non-interactive-mode
+- https://developers.openai.com/api/docs/models/gpt-6-astra
 
 GPT-6 API function calling requires Responses. This integration uses Codex CLI
 and does not assume API parameters can be copied to the app-server protocol.
