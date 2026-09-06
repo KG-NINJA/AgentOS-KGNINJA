@@ -21,6 +21,8 @@ def main(argv=None):
     serve.add_argument("--db", default="runtime/revenue/controller.sqlite3")
     serve.add_argument("--port", type=int, default=8789)
     sub.add_parser("capabilities")
+    doctor = sub.add_parser("doctor")
+    doctor.add_argument("--config", required=True)
     sub.add_parser("demo")
     backup = sub.add_parser("backup")
     backup.add_argument("--db", required=True)
@@ -49,8 +51,6 @@ def main(argv=None):
     try:
         if args.command == "serve":
             config = HostConfiguration(args.config)
-            c = config.controller(args.db)
-            c.close()
             server = make_server(args.db, config, args.port)
             print(json.dumps({"listening": "http://127.0.0.1:" + str(server.server_port), "owner": "/owner", "agent": "/agent", "payment_execution": False}), flush=True)
             try:
@@ -58,6 +58,11 @@ def main(argv=None):
             finally:
                 server.server_close()
             return 0
+        if args.command == "doctor":
+            from .readiness import inspect_host
+            output = inspect_host(args.config)
+            print(json.dumps(output, ensure_ascii=False, indent=2, allow_nan=False))
+            return 0 if output["local_prerequisites_passed"] else 78
         if args.command == "invoke":
             from .client import invoke, read_input
             output = invoke(args.origin, args.role, args.operation, read_input(args.payload), args.key)

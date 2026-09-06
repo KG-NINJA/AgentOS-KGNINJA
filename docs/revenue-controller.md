@@ -74,6 +74,36 @@ loopback-only, rejects other Host/Origin values and has no CORS. For a remote
 host, use an owner-controlled SSH tunnel once SSH is working; do not expose this
 HTTP port directly. This PR installs no service, login, tunnel or schedule.
 
+Before starting, run `python3 -m factory.revenue.cli control doctor --config
+/private/revenue/controller.json` (as one command). The JSON report checks private
+configuration, policy, unexpired role credentials, source/target allowlist
+consistency, configured verifier/payment adapters, Docker availability and the
+Codex executable. Exit 78 means local prerequisites are missing. It uses a
+disposable database; it never opens the production ledger, prints credentials,
+logs in, calls a paid model, or probes payment RPCs. Passing local checks does
+not establish live connectivity, billing limits, isolation acceptance, deployment
+or revenue; these remain explicit checks in the report. A separately integrated
+non-Codex runner requires its own reviewed acceptance checks.
+
+`serve` now expires abandoned jobs before opening the listener and every 30
+seconds while serving. The host maintenance identity can only run the existing
+expiry operation. It advances fences, marks costs unknown, and stops new work;
+it cannot approve work, publish, pay, release a reservation or restart a job.
+Idle sweeps create no audit/idempotency rows. Expiry still runs while stopped.
+Initialization occurs before request threads to avoid first-start database races.
+Maintenance failure terminates the serving loop; the CLI closes the listener.
+Already accepted requests may finish; an in-flight external effect cannot be
+undone. Runner processes must still enforce their own deadlines and lease loss.
+
+On the authorized persistent host: run `doctor`, complete the actual isolation
+acceptance test, then supervise the documented `serve` command using the existing
+service manager. Verify authenticated `/api/summary` before owner resume. To stop,
+use the authenticated `stop` operation, terminate active executors on lease loss,
+reconcile costs/effects, then stop the serving process. Use the backup command
+below before replacing a release. Keep the prior code/configuration available;
+restoring a backup always requires stopping the old instance first. This change
+does not install a service manager or an authenticated coding runner.
+
 ## Human approval and machine contracts
 
 Human goals can remain informal. Collectors and runners must send strict JSON.
@@ -258,8 +288,9 @@ allocation. Native assets are never added together or treated as USD implicitly.
 `stop` blocks new proposals/admissions/sends/verifier starts and runner heartbeats; active host
 executors must honor lease loss. Reconciliation remains available. Only the owner
 can resume after current policy review, with no unknown costs/effects or active
-budget overrun. Invoke `expire` from the installed safety monitor; no monitoring
-daemon is silently registered by this PR.
+budget overrun. The serving process invokes `expire` at startup and every 30
+seconds; direct engine embeddings must arrange their own expiry cadence. No
+external monitoring daemon is silently registered by this PR.
 
 Unknown cost by itself blocks new commitments while an already approved verifier
 finishes within the job deadline. An explicit stop also blocks that verifier.

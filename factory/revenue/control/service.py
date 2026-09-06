@@ -3,9 +3,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
 import re
+import time
+import uuid
 from .adapters import EvmReceipts, GitHubPublisher, SnapshotSource
 from .auth import Authenticator
-from .contracts import ControlError, fields, require, text
+from .contracts import ControlError, Principal, fields, require, text
 from .engine import Controller, DEFAULT_POLICY
 from .sandbox import ArtifactVerifier
 from ..sources import RevenueError, json_bytes, strict_json
@@ -56,6 +58,39 @@ class HostConfiguration:
 
     def controller(self, path):
         return Controller(path, self.policy, sources=self.sources, verifier=self.verifier, publisher=self.publisher, payments=self.payments)
+
+
+class MaintainedServer(ThreadingHTTPServer):
+    """Host-owned expiry only; never approve, publish, retry or release costs."""
+    def __init__(self, address, handler, path, config, *, clock=time.monotonic):
+        self.controller_path, self.config, self.maintenance_clock = path, config, clock
+        self.next_sweep = 0
+        # Initialize and recover before the listener can spawn request threads.
+        self.service_actions()
+        super().__init__(address, handler)
+
+    def service_actions(self):
+        now = self.maintenance_clock()
+        if now < self.next_sweep:
+            return
+        c = None
+        try:
+            c = self.config.controller(self.controller_path)
+            # Use an internal host identity, never an owner credential or a
+            # role from request JSON. Avoid growing the ledger on empty ticks.
+            with c.db.atomic():
+                actor = Principal("host-expiry-maintenance", "safety_monitor")
+                result = c.op_expire(actor, {}, "host-expiry")
+                if result["expired"]:
+                    c._audit(actor, "expire", uuid.uuid4().hex, "HOST_EXPIRED_JOBS")
+            self.next_sweep = now + 30
+        except Exception as exc:
+            # Raising out of serve_forever stops accepting new requests. A
+            # broken monitor must not leave an apparently healthy listener.
+            raise ControlError("HOST_MAINTENANCE_FAILED", 503) from exc
+        finally:
+            if c:
+                c.close()
 
 
 def make_server(path, config, port=8789):
@@ -142,4 +177,4 @@ def make_server(path, config, port=8789):
         def do_OPTIONS(self):
             self.respond(403, {"error": "CROSS_ORIGIN_ACCESS_DENIED"})
 
-    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    return MaintainedServer(("127.0.0.1", port), Handler, path, config)
