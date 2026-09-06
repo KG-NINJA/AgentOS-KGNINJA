@@ -13,6 +13,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from codex_runtime import command as codex_command, selection
+
 from session_manager import SessionManager
 
 
@@ -155,6 +157,7 @@ def run_repair(args: argparse.Namespace) -> int:
     client = FifoRpcClient(root)
     sm = SessionManager(root=root, max_idle_sec=args.session_max_idle_sec)
 
+    selection()  # Reject invalid routing before contacting the backend.
     client.request(
         "initialize",
         {"clientInfo": {"name": "kg-autonomous-codex-app-client", "version": "1.0.0"}},
@@ -163,8 +166,7 @@ def run_repair(args: argparse.Namespace) -> int:
 
     session_id = _resolve_session(sm, args.app_id)
     prompt = _repair_prompt(str(target), _tail_context(args.fail_log), args.app_id, session_id)
-    command = [
-        "codex",
+    command = codex_command("repair", [
         "exec",
         "--sandbox",
         args.sandbox_mode,
@@ -173,7 +175,7 @@ def run_repair(args: argparse.Namespace) -> int:
         "-C",
         str(target),
         prompt,
-    ]
+    ])
     res = client.request(
         "command/exec",
         {
