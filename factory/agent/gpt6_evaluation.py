@@ -123,7 +123,8 @@ def verify_workspace(workspace: Path, source_commit: str) -> None:
 
 
 def _codex_version(executable: str) -> str:
-    result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=10)
+    result = subprocess.run([executable, "--version"], capture_output=True, text=True,
+                            stdin=subprocess.DEVNULL, timeout=10)
     value = result.stdout.strip()
     if result.returncode or not value or len(value) > 200 or "\n" in value:
         raise kernel.Rejected("Codex version unavailable")
@@ -163,7 +164,11 @@ def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_secon
                "-a", "never", "exec", "--json", "--ephemeral", "--ignore-user-config",
                "--sandbox", "read-only", "--skip-git-repo-check", "-C", str(workspace.resolve()), prompt]
     started = time.monotonic_ns()
-    result = subprocess.run(command, capture_output=True, timeout=timeout_seconds)
+    # Codex treats piped stdin as additional context even when a prompt argument
+    # is present.  Long-running hosts commonly keep fd 0 open, so inheriting it
+    # can leave a non-interactive evaluation waiting forever for EOF.
+    result = subprocess.run(command, capture_output=True, stdin=subprocess.DEVNULL,
+                            timeout=timeout_seconds)
     latency_ms = (time.monotonic_ns() - started) / 1_000_000
     events, usage = _parse_events(result.stdout)
     if result.returncode:

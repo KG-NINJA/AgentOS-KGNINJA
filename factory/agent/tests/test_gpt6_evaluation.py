@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "factory/agent"))
@@ -72,6 +73,14 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
         self.assertTrue(result["requested_model_call_completed"])
         self.assertEqual(result["requested_model"], "gpt-6-astra")
         self.assertFalse(result["provider_model_identity_verified"])
+
+    def test_probe_closes_stdin_for_noninteractive_codex(self):
+        with mock.patch.object(evaluation.subprocess, "run",
+                               wraps=evaluation.subprocess.run) as run:
+            evaluation.probe("high", self.root, 10, str(self.fake))
+        self.assertEqual(len(run.call_args_list), 2)
+        for invocation in run.call_args_list:
+            self.assertIs(invocation.kwargs["stdin"], subprocess.DEVNULL)
 
     def test_collect_uses_frozen_pair_and_private_files(self):
         evidence = self.root / "evidence"

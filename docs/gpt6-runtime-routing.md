@@ -72,7 +72,9 @@ python3 factory/agent/gpt6_evaluation.py probe --effort <baseline-effective-effo
 ```
 
 The probe uses `codex exec --json --ephemeral --ignore-user-config`, a read-only
-sandbox and a fixed no-tool prompt. A successful result proves that the requested
+sandbox, a closed standard-input stream and a fixed no-tool prompt. Closing stdin
+is required because Codex otherwise treats a pipe as additional context and a
+long-running host may never deliver EOF. A successful result proves that the requested
 CLI call completed on that host; because the public JSONL stream does not attest
 provider-side model identity, the receipt deliberately keeps
 `provider_model_identity_verified: false`. Its private receipt is stored by
