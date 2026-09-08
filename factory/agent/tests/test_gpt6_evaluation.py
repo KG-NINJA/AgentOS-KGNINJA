@@ -43,7 +43,7 @@ class EvaluationTests(unittest.TestCase):
         self.fake.write_text("""#!/usr/bin/env python3
 import json,sys
 if sys.argv[1:] == ['--version']:
- print('codex-cli 9.9.9-test'); raise SystemExit
+ print('codex-cli 9.9.9'); raise SystemExit
 print(json.dumps({'type':'thread.started','thread_id':'test-thread'}))
 print(json.dumps({'type':'turn.started'}))
 print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'GPT6_ACCESS_PROBE_OK'}}))
@@ -73,6 +73,18 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
         self.assertTrue(result["requested_model_call_completed"])
         self.assertEqual(result["requested_model"], "gpt-6-astra")
         self.assertFalse(result["provider_model_identity_verified"])
+
+    def test_probe_rejects_old_cli_before_model_call(self):
+        old = self.root / "old-codex"
+        old.write_text("""#!/usr/bin/env python3
+import sys
+if sys.argv[1:] == ['--version']:
+ print('codex-cli 0.151.0'); raise SystemExit
+raise SystemExit(99)
+""")
+        old.chmod(0o755)
+        with self.assertRaises(evaluation.IncompatibleCodexCli):
+            evaluation.probe("high", self.root, 10, str(old))
 
     def test_probe_closes_stdin_for_noninteractive_codex(self):
         with mock.patch.object(evaluation.subprocess, "run",

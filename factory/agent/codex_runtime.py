@@ -8,12 +8,39 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Mapping
 
 ROLES = ("generation", "repair", "interpretation")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
+MIN_GPT6_CODEX_VERSION = (0, 153, 1)
+CODEX_VERSION = re.compile(r"^codex-cli (\d+)\.(\d+)\.(\d+)$")
+
+
+class IncompatibleCodexCli(ValueError):
+    """The installed stable CLI cannot safely address the GPT-6 model."""
+
+
+def require_gpt6_cli(executable: str = "codex") -> str:
+    """Return a compatible stable CLI version or fail before model execution."""
+    result = subprocess.run(
+        [executable, "--version"],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        timeout=10,
+    )
+    value = result.stdout.strip()
+    match = CODEX_VERSION.fullmatch(value)
+    if result.returncode or match is None:
+        raise IncompatibleCodexCli("GPT-6 requires a stable, parseable Codex CLI version")
+    version = tuple(int(part) for part in match.groups())
+    if version < MIN_GPT6_CODEX_VERSION:
+        minimum = ".".join(str(part) for part in MIN_GPT6_CODEX_VERSION)
+        raise IncompatibleCodexCli(f"GPT-6 requires Codex CLI {minimum} or newer")
+    return value
 
 
 def selection(environ: Mapping[str, str] | None = None) -> dict[str, str | None]:
@@ -57,7 +84,12 @@ def main() -> int:
         args = parsed.args[1:] if parsed.args[:1] == ["--"] else parsed.args
         if not args:
             raise ValueError("Codex command is required")
+        if selected["profile"] == "gpt6":
+            require_gpt6_cli()
         return subprocess.run(command(parsed.role, args), check=False).returncode
+    except IncompatibleCodexCli:
+        print("fail_reason=codex-cli-incompatible", file=sys.stderr)
+        return 78
     except (ValueError, OSError):
         print("fail_reason=codex-runtime-config-or-launch-error", file=sys.stderr)
         return 78

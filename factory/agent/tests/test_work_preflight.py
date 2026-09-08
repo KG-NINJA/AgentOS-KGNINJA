@@ -138,7 +138,7 @@ class GeneratorIntegrationTests(unittest.TestCase):
         (self.root / "runtime/spec.json").write_text(json.dumps({"project_type": "web_app", "ai_task": "dashboard", "entities": {"unique_marker": "UNIQUE_ENTITY_MARKER"}}))
         (self.root / "bin").mkdir()
         stub = self.root / "bin/codex"
-        stub.write_text("#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\nPath(os.environ['CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n")
+        stub.write_text("#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\nif sys.argv[1:] == ['--version']:\n print('codex-cli 0.153.1'); raise SystemExit\nPath(os.environ['CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n")
         stub.chmod(0o755)
         fallback = self.root / "factory/generator/local_fallback.sh"
         fallback.write_text('#!/usr/bin/env bash\ntouch "${FALLBACK_CAPTURE}"\nexit 91\n')
@@ -174,7 +174,13 @@ class GeneratorIntegrationTests(unittest.TestCase):
 
     def test_candidate_failure_never_uses_scaffold_fallback(self):
         self.env.update(FACTORY_CODEX_PROFILE="gpt6", FACTORY_CODEX_EFFORT="high")
-        (self.root / "bin/codex").write_text("#!/usr/bin/env bash\nexit 42\n")
+        (self.root / "bin/codex").write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            "if sys.argv[1:] == ['--version']:\n"
+            " print('codex-cli 0.153.1'); raise SystemExit\n"
+            "raise SystemExit(42)\n"
+        )
         result = self.run_generator()
         self.assertEqual(result.returncode, 42)
         self.assertFalse((self.root / "fallback.called").exists())

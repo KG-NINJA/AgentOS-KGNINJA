@@ -31,6 +31,17 @@ FACTORY_CODEX_PROFILE=gpt6 FACTORY_CODEX_EFFORT=high \
 `model_access_verified: false`. Environment values belong to the trusted host;
 never copy them from a task, generated file, spec, feedback or queue payload.
 
+Candidate execution requires stable Codex CLI 0.153.1 or newer. OpenAI added the
+GPT-6 Astra model catalog in 0.153.1; older and prerelease CLIs now fail closed
+before inference on direct, FIFO and daemon routes. Upgrade and re-run the access
+probe rather than interpreting an old-client timeout as a model-access result.
+
+For ChatGPT-authenticated Codex, OpenAI also lists the legacy generator's
+`gpt-5.3-codex` as deprecated. This branch does not silently replace that baseline:
+first inspect the target host's authentication and effective model, then choose a
+supported baseline for the matched campaign. API-key availability is a separate
+case and must be verified on the host rather than inferred from this document.
+
 Candidate generation failures do not fall back to successful local scaffolding.
 Candidate interpretation failures cannot become successful heuristic output.
 Candidate repair failures/timeouts cannot retry through another backend. Daemon
@@ -116,13 +127,14 @@ affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-07
+## Official basis, checked 2026-09-08
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference
 - https://developers.openai.com/api/docs/guides/latest-model
 - https://learn.chatgpt.com/docs/non-interactive-mode
 - https://developers.openai.com/api/docs/models/gpt-6-astra
+- https://learn.chatgpt.com/docs/changelog
 
 GPT-6 API function calling requires Responses. This integration uses Codex CLI
 and does not assume API parameters can be copied to the app-server protocol.

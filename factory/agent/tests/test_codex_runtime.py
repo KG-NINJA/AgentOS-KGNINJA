@@ -43,6 +43,23 @@ class RoutingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runtime.selection({"FACTORY_CODEX_PROFILE": "typo"})
 
+    def test_gpt6_requires_supported_stable_codex_cli(self):
+        supported = subprocess.CompletedProcess(
+            ["codex", "--version"], 0, stdout="codex-cli 0.153.1\n", stderr=""
+        )
+        with patch.object(runtime.subprocess, "run", return_value=supported) as run:
+            self.assertEqual(runtime.require_gpt6_cli(), "codex-cli 0.153.1")
+        self.assertIs(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+
+        for value in ("codex-cli 0.153.0", "codex-cli 0.153.1-alpha.1", "unexpected"):
+            result = subprocess.CompletedProcess(
+                ["codex", "--version"], 0, stdout=value + "\n", stderr=""
+            )
+            with self.subTest(value=value), patch.object(
+                runtime.subprocess, "run", return_value=result
+            ), self.assertRaises(runtime.IncompatibleCodexCli):
+                runtime.require_gpt6_cli()
+
     def test_daemon_rejects_mismatched_queue_profile_without_rpc(self):
         app = Mock()
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, CANDIDATE), patch.object(daemon, "ensure_safe_target", return_value=(True, "")):
@@ -65,7 +82,7 @@ class RoutingTests(unittest.TestCase):
         rpc.request.return_value = {"exitCode": 0}
         session = Mock()
         session.get_session.return_value = "test-session"
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, CANDIDATE), patch.object(client, "FifoRpcClient", return_value=rpc), patch.object(client, "SessionManager", return_value=session):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, CANDIDATE), patch.object(client, "require_gpt6_cli", return_value="codex-cli 0.153.1"), patch.object(client, "FifoRpcClient", return_value=rpc), patch.object(client, "SessionManager", return_value=session):
             args = argparse.Namespace(root=tmp, target_dir=tmp, session_max_idle_sec=10, app_id="test", timeout=10, fail_log="", sandbox_mode="workspace-write", approval_policy="untrusted")
             self.assertEqual(client.run_repair(args), 0)
             self.assertIn("gpt-6-astra", rpc.request.call_args.args[1]["command"])
@@ -84,7 +101,7 @@ class RoutingTests(unittest.TestCase):
                 (root / "runtime").mkdir()
                 (root / "queue/task.md").write_text("Build a useful dashboard")
                 stub = root / "bin/codex"
-                stub.write_text("#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\nPath(os.environ['CAPTURE']).write_text(json.dumps(sys.argv[1:]))\nsys.exit(42)\n")
+                stub.write_text("#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\nif sys.argv[1:] == ['--version']:\n print('codex-cli 0.153.1'); raise SystemExit\nPath(os.environ['CAPTURE']).write_text(json.dumps(sys.argv[1:]))\nsys.exit(42)\n")
                 stub.chmod(0o755)
                 env = dict(os.environ, **CANDIDATE, PATH=str(root / "bin") + os.pathsep + os.environ["PATH"], CAPTURE=str(root / "capture.json"))
                 args = ["bash", str(root / relative)] + ([str(root / "target")] if role == "repair" else [])

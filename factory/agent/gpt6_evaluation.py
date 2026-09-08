@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 KERNEL_DIR = ROOT / ".agents/skills/gpt6-work-platform/scripts"
 sys.path.insert(0, str(KERNEL_DIR))
 import work_kernel as kernel  # noqa: E402
+from codex_runtime import IncompatibleCodexCli, require_gpt6_cli  # noqa: E402
 
 SCHEMA = "gpt6-evaluation.v1"
 RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v1"
@@ -123,12 +124,7 @@ def verify_workspace(workspace: Path, source_commit: str) -> None:
 
 
 def _codex_version(executable: str) -> str:
-    result = subprocess.run([executable, "--version"], capture_output=True, text=True,
-                            stdin=subprocess.DEVNULL, timeout=10)
-    value = result.stdout.strip()
-    if result.returncode or not value or len(value) > 200 or "\n" in value:
-        raise kernel.Rejected("Codex version unavailable")
-    return value
+    return require_gpt6_cli(executable)
 
 
 def _parse_events(raw: bytes) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -350,7 +346,8 @@ def main() -> int:
             output = compile_report(args.campaign, args.evidence_dir, args.grades)
         print(kernel.canonical(output).decode())
         return 0
-    except (kernel.Rejected, OSError, subprocess.SubprocessError, json.JSONDecodeError, UnicodeError) as exc:
+    except (kernel.Rejected, IncompatibleCodexCli, OSError, subprocess.SubprocessError,
+            json.JSONDecodeError, UnicodeError) as exc:
         print(json.dumps({"status": "blocked", "error_type": type(exc).__name__}))
         return 2
 
