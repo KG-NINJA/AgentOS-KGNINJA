@@ -27,9 +27,22 @@ from codex_runtime import IncompatibleCodexCli, require_gpt6_cli  # noqa: E402
 
 SCHEMA = "gpt6-evaluation.v1"
 RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v1"
+BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
 COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 PROBE_PROMPT = "Reply with exactly: GPT6_ACCESS_PROBE_OK. Do not call tools."
+MAX_EVENT_STREAM_BYTES = 16 * 1024 * 1024
+
+
+class CodexRunBlocked(subprocess.SubprocessError):
+    """A model request did not complete; expose only bounded diagnostic metadata."""
+
+    def __init__(self, summary: dict[str, Any], raw_stdout: bytes):
+        super().__init__(summary["reason"])
+        self.summary = summary
+        self.raw_stdout = raw_stdout
+        self.receipt_path: str | None = None
+        self.raw_path: str | None = None
 
 
 def _sha_bytes(value: bytes) -> str:
@@ -128,7 +141,7 @@ def _codex_version(executable: str) -> str:
 
 
 def _parse_events(raw: bytes) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    if len(raw) > 16 * 1024 * 1024:
+    if len(raw) > MAX_EVENT_STREAM_BYTES:
         raise kernel.Rejected("Codex event stream too large")
     events: list[dict[str, Any]] = []
     for line in raw.splitlines():
@@ -149,6 +162,39 @@ def _parse_events(raw: bytes) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return events, usage
 
 
+def _partial_event_summary(raw: bytes) -> dict[str, Any]:
+    """Summarize complete JSONL records without exposing event payloads."""
+    event_types: list[str] = []
+    malformed_lines = 0
+    for line in raw[:MAX_EVENT_STREAM_BYTES].splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except (json.JSONDecodeError, UnicodeError):
+            malformed_lines += 1
+            continue
+        if type(event) is not dict or type(event.get("type")) is not str:
+            malformed_lines += 1
+            continue
+        event_types.append(event["type"])
+    return {
+        "parseable_event_count": len(event_types),
+        "malformed_event_line_count": malformed_lines,
+        "thread_started_observed": "thread.started" in event_types,
+        "turn_started_observed": "turn.started" in event_types,
+        "turn_completed_observed": "turn.completed" in event_types,
+        "failure_event_observed": any(value in ("turn.failed", "error") for value in event_types),
+        "event_scan_truncated": len(raw) > MAX_EVENT_STREAM_BYTES,
+    }
+
+
+def _timeout_bytes(value: bytes | str | None) -> bytes:
+    if value is None:
+        return b""
+    return value if type(value) is bytes else value.encode("utf-8", errors="replace")
+
+
 def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_seconds: int,
             executable: str = "codex") -> tuple[dict[str, Any], bytes]:
     if effort not in ("low", "medium", "high", "xhigh", "max"):
@@ -163,8 +209,29 @@ def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_secon
     # Codex treats piped stdin as additional context even when a prompt argument
     # is present.  Long-running hosts commonly keep fd 0 open, so inheriting it
     # can leave a non-interactive evaluation waiting forever for EOF.
-    result = subprocess.run(command, capture_output=True, stdin=subprocess.DEVNULL,
-                            timeout=timeout_seconds)
+    try:
+        result = subprocess.run(command, capture_output=True, stdin=subprocess.DEVNULL,
+                                timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        latency_ms = (time.monotonic_ns() - started) / 1_000_000
+        raw_stdout = _timeout_bytes(exc.stdout)
+        raw_stderr = _timeout_bytes(exc.stderr)
+        summary = {
+            "schema_version": BLOCKED_SCHEMA,
+            "status": "blocked",
+            "reason": "timeout",
+            "requested_model": model,
+            "requested_effort": effort,
+            "timeout_seconds": timeout_seconds,
+            "latency_ms": latency_ms,
+            "stdout_bytes": len(raw_stdout),
+            "stdout_sha256": _sha_bytes(raw_stdout),
+            "stderr_bytes": len(raw_stderr),
+            "stderr_sha256": _sha_bytes(raw_stderr),
+            **_partial_event_summary(raw_stdout),
+        }
+        kernel.canonical(summary)
+        raise CodexRunBlocked(summary, raw_stdout) from exc
     latency_ms = (time.monotonic_ns() - started) / 1_000_000
     events, usage = _parse_events(result.stdout)
     if result.returncode:
@@ -200,9 +267,37 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
     verify_workspace(workspace, campaign["source_commit"])
     model = campaign[side + "_model"]
     version = _codex_version(executable)
-    summary, raw = execute(model, campaign["effort"], case["prompt"], workspace,
-                           timeout_seconds, executable)
     stem = case_id + "." + side
+    try:
+        summary, raw = execute(model, campaign["effort"], case["prompt"], workspace,
+                               timeout_seconds, executable)
+    except CodexRunBlocked as exc:
+        raw_path = evidence_dir / (stem + ".blocked.jsonl")
+        receipt_path = evidence_dir / (stem + ".blocked.receipt.json")
+        raw_stored = len(exc.raw_stdout) <= MAX_EVENT_STREAM_BYTES
+        if raw_stored:
+            _write_private_bytes(raw_path, exc.raw_stdout)
+        receipt = {
+            **exc.summary,
+            "campaign_sha256": kernel.digest(campaign),
+            "case_id": case_id,
+            "side": side,
+            "category": case["category"],
+            "budget_id": campaign["budget_id"],
+            "input_sha256": case_input_sha(campaign, case),
+            "prompt_sha256": _sha_bytes(case["prompt"].encode()),
+            "source_commit": campaign["source_commit"],
+            "codex_version": version,
+            "provider_model_identity_verified": False,
+            "completed": False,
+            "partial_stdout_stored": raw_stored,
+            "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        _write_private(receipt_path, receipt)
+        exc.summary = receipt
+        exc.receipt_path = str(receipt_path)
+        exc.raw_path = str(raw_path) if raw_stored else None
+        raise
     raw_path = evidence_dir / (stem + ".jsonl")
     receipt_path = evidence_dir / (stem + ".receipt.json")
     _write_private_bytes(raw_path, raw)
@@ -221,8 +316,12 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
 def probe(effort: str, workspace: Path, timeout_seconds: int,
           executable: str = "codex") -> dict[str, Any]:
     version = _codex_version(executable)
-    summary, _ = execute("gpt-6-astra", effort, PROBE_PROMPT, workspace,
-                         timeout_seconds, executable)
+    try:
+        summary, _ = execute("gpt-6-astra", effort, PROBE_PROMPT, workspace,
+                             timeout_seconds, executable)
+    except CodexRunBlocked as exc:
+        exc.summary["codex_version"] = version
+        raise
     if summary["final_message_sha256"] != _sha_bytes(b"GPT6_ACCESS_PROBE_OK"):
         raise kernel.Rejected("Codex probe response mismatch")
     return {"schema_version": "gpt6-access-probe.v1", "requested_model": "gpt-6-astra",
@@ -346,6 +445,27 @@ def main() -> int:
             output = compile_report(args.campaign, args.evidence_dir, args.grades)
         print(kernel.canonical(output).decode())
         return 0
+    except CodexRunBlocked as exc:
+        if args.command == "probe":
+            raw_path = args.output.with_name(args.output.stem + ".blocked.jsonl")
+            raw_stored = len(exc.raw_stdout) <= MAX_EVENT_STREAM_BYTES
+            receipt = {
+                **exc.summary,
+                "schema_version": "gpt6-access-probe-blocked.v1",
+                "provider_model_identity_verified": False,
+                "requested_model_call_completed": False,
+                "partial_stdout_stored": raw_stored,
+                "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+            if raw_stored:
+                _write_private_bytes(raw_path, exc.raw_stdout)
+            _write_private(args.output, receipt)
+            exc.summary = receipt
+            exc.receipt_path = str(args.output)
+            exc.raw_path = str(raw_path) if raw_stored else None
+        print(kernel.canonical({**exc.summary, "receipt_path": exc.receipt_path,
+                                "raw_path": exc.raw_path}).decode())
+        return 2
     except (kernel.Rejected, IncompatibleCodexCli, OSError, subprocess.SubprocessError,
             json.JSONDecodeError, UnicodeError) as exc:
         print(json.dumps({"status": "blocked", "error_type": type(exc).__name__}))

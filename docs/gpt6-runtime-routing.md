@@ -91,6 +91,14 @@ provider-side model identity, the receipt deliberately keeps
 `provider_model_identity_verified: false`. Its private receipt is stored by
 default at `runtime/gpt6-evaluation/access-probe.json`.
 
+If the CLI reaches its deadline, the command exits blocked and never counts as a
+completed probe or comparison. It preserves partial stdout up to the existing
+16 MiB event limit as a private 0600 `.blocked.jsonl` file and writes a blocked receipt. The shareable receipt contains
+only byte counts, SHA-256 hashes and whether complete JSONL records showed thread
+start, turn start, completion or failure; it never copies event payloads or stderr.
+This shows whether the CLI emitted lifecycle events before stalling without
+turning a requested model name or partial response into access evidence.
+
 For the comparison, create an operator-reviewed campaign JSON with the exact
 `gpt6-evaluation.v1` fields enforced by `validate-campaign`: a baseline model,
 `gpt-6-astra`, one shared effort and budget ID, a full clean source commit, and 30
@@ -127,7 +135,7 @@ affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-08
+## Official basis, checked 2026-09-09
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference

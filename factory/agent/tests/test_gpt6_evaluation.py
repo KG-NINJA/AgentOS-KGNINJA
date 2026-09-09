@@ -1,6 +1,8 @@
 """Offline tests; the fake executable is not evidence of model access."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -102,6 +104,64 @@ raise SystemExit(99)
         self.assertEqual(result["source_commit"], self.commit)
         self.assertEqual(os.stat(evidence).st_mode & 0o777, 0o700)
         self.assertEqual(os.stat(evidence / "case-0.candidate.receipt.json").st_mode & 0o777, 0o600)
+
+    def test_timeout_preserves_private_partial_evidence_without_counting_completion(self):
+        slow = self.root / "slow-codex"
+        slow.write_text("""#!/usr/bin/env python3
+import json,sys,time
+if sys.argv[1:] == ['--version']:
+ print('codex-cli 9.9.9'); raise SystemExit
+print(json.dumps({'type':'thread.started','thread_id':'private-thread'}), flush=True)
+print(json.dumps({'type':'turn.started'}), flush=True)
+time.sleep(5)
+""")
+        slow.chmod(0o755)
+        evidence = self.root / "evidence"
+        with self.assertRaises(evaluation.CodexRunBlocked) as raised:
+            evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+                               evidence, 1, str(slow))
+        summary = raised.exception.summary
+        self.assertFalse(summary["completed"])
+        self.assertTrue(summary["thread_started_observed"])
+        self.assertTrue(summary["turn_started_observed"])
+        self.assertFalse(summary["turn_completed_observed"])
+        self.assertNotIn("private-thread", json.dumps(summary))
+        receipt = evidence / "case-0.candidate.blocked.receipt.json"
+        raw = evidence / "case-0.candidate.blocked.jsonl"
+        self.assertTrue(receipt.is_file())
+        self.assertIn("private-thread", raw.read_text())
+        self.assertEqual(os.stat(receipt).st_mode & 0o777, 0o600)
+        self.assertEqual(os.stat(raw).st_mode & 0o777, 0o600)
+
+    def test_probe_cli_writes_blocked_receipt_and_safe_stdout(self):
+        partial = b'{"type":"thread.started","thread_id":"private-thread"}\n'
+        summary = {
+            "schema_version": evaluation.BLOCKED_SCHEMA,
+            "status": "blocked",
+            "reason": "timeout",
+            "requested_model": "gpt-6-astra",
+            "requested_effort": "high",
+            "timeout_seconds": 1,
+            "latency_ms": 1000.0,
+            "stdout_bytes": len(partial),
+            "stdout_sha256": evaluation._sha_bytes(partial),
+            "stderr_bytes": 0,
+            "stderr_sha256": evaluation._sha_bytes(b""),
+            **evaluation._partial_event_summary(partial),
+        }
+        blocked = evaluation.CodexRunBlocked(summary, partial)
+        output = self.root / "probe.json"
+        stdout = io.StringIO()
+        argv = ["gpt6_evaluation.py", "probe", "--effort", "high",
+                "--timeout-seconds", "1", "--output", str(output)]
+        with mock.patch.object(evaluation, "probe", side_effect=blocked), \
+                mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(stdout):
+            self.assertEqual(evaluation.main(), 2)
+        public = json.loads(stdout.getvalue())
+        self.assertFalse(public["requested_model_call_completed"])
+        self.assertNotIn("private-thread", stdout.getvalue())
+        self.assertIn("private-thread", output.with_name("probe.blocked.jsonl").read_text())
+        self.assertEqual(os.stat(output).st_mode & 0o777, 0o600)
 
     def test_compile_requires_separate_complete_grades(self):
         evidence = self.root / "evidence"
