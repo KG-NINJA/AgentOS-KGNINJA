@@ -35,6 +35,9 @@ Candidate execution requires stable Codex CLI 0.153.1 or newer. OpenAI added the
 GPT-6 Astra model catalog in 0.153.1; older and prerelease CLIs now fail closed
 before inference on direct, FIFO and daemon routes. Upgrade and re-run the access
 probe rather than interpreting an old-client timeout as a model-access result.
+OpenAI released stable CLI 0.154.0 on 2026-09-09 with Astra in the model picker;
+prefer that current stable line for a new target-host rollout while retaining
+0.153.1 as the explicit-model compatibility floor.
 
 For ChatGPT-authenticated Codex, OpenAI also lists the legacy generator's
 `gpt-5.3-codex` as deprecated. This branch does not silently replace that baseline:
@@ -91,11 +94,14 @@ provider-side model identity, the receipt deliberately keeps
 `provider_model_identity_verified: false`. Its private receipt is stored by
 default at `runtime/gpt6-evaluation/access-probe.json`.
 
-If the CLI reaches its deadline, the command exits blocked and never counts as a
-completed probe or comparison. It preserves partial stdout up to the existing
-16 MiB event limit as a private 0600 `.blocked.jsonl` file and writes a blocked receipt. The shareable receipt contains
+If the CLI reaches its deadline, exits unsuccessfully, or emits an invalid or
+incomplete JSONL stream, the command exits blocked and never counts as a completed
+probe or comparison. It preserves stdout and stderr separately up to the existing
+16 MiB event limit as private 0600 files and writes a blocked receipt. The
+shareable receipt contains
 only byte counts, SHA-256 hashes and whether complete JSONL records showed thread
-start, turn start, completion or failure; it never copies event payloads or stderr.
+start, turn start, completion or failure, plus the process exit code when known;
+it never copies event payloads or stderr content.
 This shows whether the CLI emitted lifecycle events before stalling without
 turning a requested model name or partial response into access evidence.
 
@@ -135,7 +141,7 @@ affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-09
+## Official basis, checked 2026-09-10
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference

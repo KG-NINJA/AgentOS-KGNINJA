@@ -37,12 +37,14 @@ MAX_EVENT_STREAM_BYTES = 16 * 1024 * 1024
 class CodexRunBlocked(subprocess.SubprocessError):
     """A model request did not complete; expose only bounded diagnostic metadata."""
 
-    def __init__(self, summary: dict[str, Any], raw_stdout: bytes):
+    def __init__(self, summary: dict[str, Any], raw_stdout: bytes, raw_stderr: bytes):
         super().__init__(summary["reason"])
         self.summary = summary
         self.raw_stdout = raw_stdout
+        self.raw_stderr = raw_stderr
         self.receipt_path: str | None = None
         self.raw_path: str | None = None
+        self.stderr_path: str | None = None
 
 
 def _sha_bytes(value: bytes) -> str:
@@ -189,10 +191,32 @@ def _partial_event_summary(raw: bytes) -> dict[str, Any]:
     }
 
 
-def _timeout_bytes(value: bytes | str | None) -> bytes:
+def _output_bytes(value: bytes | str | None) -> bytes:
     if value is None:
         return b""
     return value if type(value) is bytes else value.encode("utf-8", errors="replace")
+
+
+def _blocked_summary(reason: str, model: str, effort: str, timeout_seconds: int,
+                     latency_ms: float, stdout: bytes, stderr: bytes,
+                     returncode: int | None) -> dict[str, Any]:
+    summary = {
+        "schema_version": BLOCKED_SCHEMA,
+        "status": "blocked",
+        "reason": reason,
+        "requested_model": model,
+        "requested_effort": effort,
+        "timeout_seconds": timeout_seconds,
+        "latency_ms": latency_ms,
+        "process_returncode": returncode,
+        "stdout_bytes": len(stdout),
+        "stdout_sha256": _sha_bytes(stdout),
+        "stderr_bytes": len(stderr),
+        "stderr_sha256": _sha_bytes(stderr),
+        **_partial_event_summary(stdout),
+    }
+    kernel.canonical(summary)
+    return summary
 
 
 def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_seconds: int,
@@ -214,28 +238,25 @@ def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_secon
                                 timeout=timeout_seconds)
     except subprocess.TimeoutExpired as exc:
         latency_ms = (time.monotonic_ns() - started) / 1_000_000
-        raw_stdout = _timeout_bytes(exc.stdout)
-        raw_stderr = _timeout_bytes(exc.stderr)
-        summary = {
-            "schema_version": BLOCKED_SCHEMA,
-            "status": "blocked",
-            "reason": "timeout",
-            "requested_model": model,
-            "requested_effort": effort,
-            "timeout_seconds": timeout_seconds,
-            "latency_ms": latency_ms,
-            "stdout_bytes": len(raw_stdout),
-            "stdout_sha256": _sha_bytes(raw_stdout),
-            "stderr_bytes": len(raw_stderr),
-            "stderr_sha256": _sha_bytes(raw_stderr),
-            **_partial_event_summary(raw_stdout),
-        }
-        kernel.canonical(summary)
-        raise CodexRunBlocked(summary, raw_stdout) from exc
+        raw_stdout = _output_bytes(exc.stdout)
+        raw_stderr = _output_bytes(exc.stderr)
+        summary = _blocked_summary("timeout", model, effort, timeout_seconds,
+                                   latency_ms, raw_stdout, raw_stderr, None)
+        raise CodexRunBlocked(summary, raw_stdout, raw_stderr) from exc
     latency_ms = (time.monotonic_ns() - started) / 1_000_000
-    events, usage = _parse_events(result.stdout)
+    raw_stdout = _output_bytes(result.stdout)
+    raw_stderr = _output_bytes(result.stderr)
+    try:
+        events, usage = _parse_events(raw_stdout)
+    except (kernel.Rejected, json.JSONDecodeError, UnicodeError) as exc:
+        reason = "process-failure" if result.returncode else "invalid-or-incomplete-event-stream"
+        summary = _blocked_summary(reason, model, effort, timeout_seconds, latency_ms,
+                                   raw_stdout, raw_stderr, result.returncode)
+        raise CodexRunBlocked(summary, raw_stdout, raw_stderr) from exc
     if result.returncode:
-        raise kernel.Rejected("Codex process returned failure")
+        summary = _blocked_summary("process-failure", model, effort, timeout_seconds,
+                                   latency_ms, raw_stdout, raw_stderr, result.returncode)
+        raise CodexRunBlocked(summary, raw_stdout, raw_stderr)
     thread = next(event for event in events if event["type"] == "thread.started")
     thread_id = thread.get("thread_id")
     if type(thread_id) is not str or not thread_id:
@@ -253,9 +274,9 @@ def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_secon
                "reasoning_output_tokens": usage.get("reasoning_output_tokens"),
                "thread_id_sha256": _sha_bytes(thread_id.encode()),
                "final_message_sha256": _sha_bytes(messages[-1].encode()),
-               "event_stream_sha256": _sha_bytes(result.stdout)}
+               "event_stream_sha256": _sha_bytes(raw_stdout)}
     kernel.canonical(summary)
-    return summary, result.stdout
+    return summary, raw_stdout
 
 
 def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
@@ -273,10 +294,14 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
                                timeout_seconds, executable)
     except CodexRunBlocked as exc:
         raw_path = evidence_dir / (stem + ".blocked.jsonl")
+        stderr_path = evidence_dir / (stem + ".blocked.stderr")
         receipt_path = evidence_dir / (stem + ".blocked.receipt.json")
         raw_stored = len(exc.raw_stdout) <= MAX_EVENT_STREAM_BYTES
+        stderr_stored = len(exc.raw_stderr) <= MAX_EVENT_STREAM_BYTES
         if raw_stored:
             _write_private_bytes(raw_path, exc.raw_stdout)
+        if stderr_stored:
+            _write_private_bytes(stderr_path, exc.raw_stderr)
         receipt = {
             **exc.summary,
             "campaign_sha256": kernel.digest(campaign),
@@ -291,12 +316,14 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
             "provider_model_identity_verified": False,
             "completed": False,
             "partial_stdout_stored": raw_stored,
+            "private_stderr_stored": stderr_stored,
             "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         _write_private(receipt_path, receipt)
         exc.summary = receipt
         exc.receipt_path = str(receipt_path)
         exc.raw_path = str(raw_path) if raw_stored else None
+        exc.stderr_path = str(stderr_path) if stderr_stored else None
         raise
     raw_path = evidence_dir / (stem + ".jsonl")
     receipt_path = evidence_dir / (stem + ".receipt.json")
@@ -448,23 +475,30 @@ def main() -> int:
     except CodexRunBlocked as exc:
         if args.command == "probe":
             raw_path = args.output.with_name(args.output.stem + ".blocked.jsonl")
+            stderr_path = args.output.with_name(args.output.stem + ".blocked.stderr")
             raw_stored = len(exc.raw_stdout) <= MAX_EVENT_STREAM_BYTES
+            stderr_stored = len(exc.raw_stderr) <= MAX_EVENT_STREAM_BYTES
             receipt = {
                 **exc.summary,
                 "schema_version": "gpt6-access-probe-blocked.v1",
                 "provider_model_identity_verified": False,
                 "requested_model_call_completed": False,
                 "partial_stdout_stored": raw_stored,
+                "private_stderr_stored": stderr_stored,
                 "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
             if raw_stored:
                 _write_private_bytes(raw_path, exc.raw_stdout)
+            if stderr_stored:
+                _write_private_bytes(stderr_path, exc.raw_stderr)
             _write_private(args.output, receipt)
             exc.summary = receipt
             exc.receipt_path = str(args.output)
             exc.raw_path = str(raw_path) if raw_stored else None
+            exc.stderr_path = str(stderr_path) if stderr_stored else None
         print(kernel.canonical({**exc.summary, "receipt_path": exc.receipt_path,
-                                "raw_path": exc.raw_path}).decode())
+                                "raw_path": exc.raw_path,
+                                "stderr_path": exc.stderr_path}).decode())
         return 2
     except (kernel.Rejected, IncompatibleCodexCli, OSError, subprocess.SubprocessError,
             json.JSONDecodeError, UnicodeError) as exc:

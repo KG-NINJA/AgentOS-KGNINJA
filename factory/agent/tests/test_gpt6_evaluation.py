@@ -133,6 +133,47 @@ time.sleep(5)
         self.assertEqual(os.stat(receipt).st_mode & 0o777, 0o600)
         self.assertEqual(os.stat(raw).st_mode & 0o777, 0o600)
 
+    def test_process_failure_preserves_events_but_not_stderr_payload(self):
+        failed = self.root / "failed-codex"
+        failed.write_text("""#!/usr/bin/env python3
+import json,sys
+if sys.argv[1:] == ['--version']:
+ print('codex-cli 9.9.9'); raise SystemExit
+print(json.dumps({'type':'thread.started','thread_id':'private-thread'}))
+print(json.dumps({'type':'error','message':'private-model-error'}))
+print('private-stderr-detail', file=sys.stderr)
+raise SystemExit(23)
+""")
+        failed.chmod(0o755)
+        evidence = self.root / "evidence"
+        with self.assertRaises(evaluation.CodexRunBlocked) as raised:
+            evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+                               evidence, 10, str(failed))
+        summary = raised.exception.summary
+        self.assertEqual(summary["reason"], "process-failure")
+        self.assertEqual(summary["process_returncode"], 23)
+        self.assertTrue(summary["failure_event_observed"])
+        self.assertFalse(summary["completed"])
+        self.assertNotIn("private-model-error", json.dumps(summary))
+        self.assertNotIn("private-stderr-detail", json.dumps(summary))
+        raw = evidence / "case-0.candidate.blocked.jsonl"
+        stderr = evidence / "case-0.candidate.blocked.stderr"
+        self.assertIn("private-model-error", raw.read_text())
+        self.assertIn("private-stderr-detail", stderr.read_text())
+        self.assertEqual(os.stat(stderr).st_mode & 0o777, 0o600)
+
+    def test_invalid_success_stream_is_blocked_with_safe_diagnostics(self):
+        malformed = self.root / "malformed-codex"
+        malformed.write_text("#!/bin/sh\nprintf 'not-json\\n'\n")
+        malformed.chmod(0o755)
+        with self.assertRaises(evaluation.CodexRunBlocked) as raised:
+            evaluation.execute("gpt-6-astra", "high", "test", self.root, 10,
+                               str(malformed))
+        summary = raised.exception.summary
+        self.assertEqual(summary["reason"], "invalid-or-incomplete-event-stream")
+        self.assertEqual(summary["process_returncode"], 0)
+        self.assertEqual(summary["malformed_event_line_count"], 1)
+
     def test_probe_cli_writes_blocked_receipt_and_safe_stdout(self):
         partial = b'{"type":"thread.started","thread_id":"private-thread"}\n'
         summary = {
@@ -143,13 +184,14 @@ time.sleep(5)
             "requested_effort": "high",
             "timeout_seconds": 1,
             "latency_ms": 1000.0,
+            "process_returncode": None,
             "stdout_bytes": len(partial),
             "stdout_sha256": evaluation._sha_bytes(partial),
             "stderr_bytes": 0,
             "stderr_sha256": evaluation._sha_bytes(b""),
             **evaluation._partial_event_summary(partial),
         }
-        blocked = evaluation.CodexRunBlocked(summary, partial)
+        blocked = evaluation.CodexRunBlocked(summary, partial, b"")
         output = self.root / "probe.json"
         stdout = io.StringIO()
         argv = ["gpt6_evaluation.py", "probe", "--effort", "high",
@@ -161,6 +203,7 @@ time.sleep(5)
         self.assertFalse(public["requested_model_call_completed"])
         self.assertNotIn("private-thread", stdout.getvalue())
         self.assertIn("private-thread", output.with_name("probe.blocked.jsonl").read_text())
+        self.assertEqual(output.with_name("probe.blocked.stderr").read_bytes(), b"")
         self.assertEqual(os.stat(output).st_mode & 0o777, 0o600)
 
     def test_compile_requires_separate_complete_grades(self):
