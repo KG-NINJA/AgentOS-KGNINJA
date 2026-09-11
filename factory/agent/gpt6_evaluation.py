@@ -248,6 +248,16 @@ def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_secon
     raw_stderr = _output_bytes(result.stderr)
     try:
         events, usage = _parse_events(raw_stdout)
+        thread = next(event for event in events if event["type"] == "thread.started")
+        thread_id = thread.get("thread_id")
+        if type(thread_id) is not str or not thread_id:
+            raise kernel.Rejected("Codex completion is missing thread id")
+        messages = [event.get("item", {}).get("text") for event in events
+                    if event.get("type") == "item.completed"
+                    and type(event.get("item")) is dict
+                    and event["item"].get("type") == "agent_message"]
+        if not messages or type(messages[-1]) is not str:
+            raise kernel.Rejected("Codex completion is missing final agent message")
     except (kernel.Rejected, json.JSONDecodeError, UnicodeError) as exc:
         reason = "process-failure" if result.returncode else "invalid-or-incomplete-event-stream"
         summary = _blocked_summary(reason, model, effort, timeout_seconds, latency_ms,
@@ -257,16 +267,6 @@ def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_secon
         summary = _blocked_summary("process-failure", model, effort, timeout_seconds,
                                    latency_ms, raw_stdout, raw_stderr, result.returncode)
         raise CodexRunBlocked(summary, raw_stdout, raw_stderr)
-    thread = next(event for event in events if event["type"] == "thread.started")
-    thread_id = thread.get("thread_id")
-    if type(thread_id) is not str or not thread_id:
-        raise kernel.Rejected("Codex completion is missing thread id")
-    messages = [event.get("item", {}).get("text") for event in events
-                if event.get("type") == "item.completed"
-                and type(event.get("item")) is dict
-                and event["item"].get("type") == "agent_message"]
-    if not messages or type(messages[-1]) is not str:
-        raise kernel.Rejected("Codex completion is missing final agent message")
     summary = {"completed": True, "latency_ms": latency_ms,
                "input_tokens": usage["input_tokens"],
                "cached_input_tokens": usage.get("cached_input_tokens"),

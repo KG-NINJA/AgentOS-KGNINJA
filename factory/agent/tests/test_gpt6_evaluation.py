@@ -174,6 +174,45 @@ raise SystemExit(23)
         self.assertEqual(summary["process_returncode"], 0)
         self.assertEqual(summary["malformed_event_line_count"], 1)
 
+    def test_incomplete_success_stream_preserves_private_evidence(self):
+        incomplete = self.root / "incomplete-codex"
+        incomplete.write_text("""#!/usr/bin/env python3
+import json,sys
+if sys.argv[1:] == ['--version']:
+ print('codex-cli 9.9.9'); raise SystemExit
+print(json.dumps({'type':'thread.started','thread_id':'private-thread'}))
+print(json.dumps({'type':'turn.started'}))
+print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
+""")
+        incomplete.chmod(0o755)
+        evidence = self.root / "evidence"
+        with self.assertRaises(evaluation.CodexRunBlocked) as raised:
+            evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+                               evidence, 10, str(incomplete))
+        summary = raised.exception.summary
+        self.assertEqual(summary["reason"], "invalid-or-incomplete-event-stream")
+        self.assertTrue(summary["turn_completed_observed"])
+        self.assertFalse(summary["completed"])
+        self.assertNotIn("private-thread", json.dumps(summary))
+        raw = evidence / "case-0.candidate.blocked.jsonl"
+        self.assertIn("private-thread", raw.read_text())
+        self.assertEqual(os.stat(raw).st_mode & 0o777, 0o600)
+
+    def test_completion_without_thread_id_is_blocked(self):
+        events = b"\n".join((
+            b'{"type":"thread.started"}',
+            b'{"type":"item.completed","item":{"type":"agent_message","text":"private"}}',
+            b'{"type":"turn.completed","usage":{"input_tokens":1}}',
+        )) + b"\n"
+        completed = subprocess.CompletedProcess([], 0, events, b"")
+        with mock.patch.object(evaluation.subprocess, "run", return_value=completed):
+            with self.assertRaises(evaluation.CodexRunBlocked) as raised:
+                evaluation.execute("gpt-6-astra", "high", "test", self.root, 10,
+                                   str(self.fake))
+        self.assertEqual(raised.exception.summary["reason"],
+                         "invalid-or-incomplete-event-stream")
+        self.assertNotIn("private", json.dumps(raised.exception.summary))
+
     def test_probe_cli_writes_blocked_receipt_and_safe_stdout(self):
         partial = b'{"type":"thread.started","thread_id":"private-thread"}\n'
         summary = {

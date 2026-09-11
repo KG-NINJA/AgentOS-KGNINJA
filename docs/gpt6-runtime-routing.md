@@ -104,6 +104,9 @@ start, turn start, completion or failure, plus the process exit code when known;
 it never copies event payloads or stderr content.
 This shows whether the CLI emitted lifecycle events before stalling without
 turning a requested model name or partial response into access evidence.
+An apparently completed stream is still incomplete unless it contains a nonempty
+thread ID and a final agent message; those failures use the same private evidence
+path and are never promoted to a generic success receipt.
 
 For the comparison, create an operator-reviewed campaign JSON with the exact
 `gpt6-evaluation.v1` fields enforced by `validate-campaign`: a baseline model,
