@@ -51,9 +51,17 @@ def _sha_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _ensure_private_directory(path: Path) -> None:
+    if path.is_symlink():
+        raise kernel.Rejected("private evidence directory cannot be a symlink")
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.is_symlink() or not path.is_dir():
+        raise kernel.Rejected("private evidence path must be a directory")
+    os.chmod(path, 0o700)
+
+
 def _write_private_bytes(path: Path, payload: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(path.parent, 0o700)
+    _ensure_private_directory(path.parent)
     fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
     try:
         os.fchmod(fd, 0o600)
@@ -73,6 +81,38 @@ def _write_private_bytes(path: Path, payload: bytes) -> None:
 
 def _write_private(path: Path, value: dict[str, Any]) -> None:
     _write_private_bytes(path, kernel.canonical(value) + b"\n")
+
+
+def _claim_attempt(evidence_dir: Path, stem: str) -> Path:
+    """Claim one case/side before inference and refuse uncertain re-entry."""
+    _ensure_private_directory(evidence_dir)
+    completed = (evidence_dir / (stem + ".jsonl"),
+                 evidence_dir / (stem + ".receipt.json"))
+    if any(path.exists() or path.is_symlink() for path in completed):
+        raise kernel.Rejected("completed or partial evidence already exists")
+    lock_path = evidence_dir / ("." + stem + ".lock")
+    try:
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as exc:
+        raise kernel.Rejected("attempt already in progress or requires reconciliation") from exc
+    try:
+        os.write(descriptor, b"gpt6-evaluation-attempt\n")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    # Close the race between the initial evidence check and the exclusive claim.
+    if any(path.exists() or path.is_symlink() for path in completed):
+        lock_path.unlink()
+        raise kernel.Rejected("completed or partial evidence already exists")
+    return lock_path
+
+
+def _blocked_attempt_dir(evidence_dir: Path, stem: str) -> Path:
+    root = evidence_dir / "blocked"
+    _ensure_private_directory(root)
+    attempt = Path(tempfile.mkdtemp(prefix=stem + ".", dir=root))
+    os.chmod(attempt, 0o700)
+    return attempt
 
 
 def load_campaign(path: Path) -> dict[str, Any]:
@@ -289,55 +329,64 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
     model = campaign[side + "_model"]
     version = _codex_version(executable)
     stem = case_id + "." + side
+    lock_path = _claim_attempt(evidence_dir, stem)
+    resolved = False
     try:
-        summary, raw = execute(model, campaign["effort"], case["prompt"], workspace,
-                               timeout_seconds, executable)
-    except CodexRunBlocked as exc:
-        raw_path = evidence_dir / (stem + ".blocked.jsonl")
-        stderr_path = evidence_dir / (stem + ".blocked.stderr")
-        receipt_path = evidence_dir / (stem + ".blocked.receipt.json")
-        raw_stored = len(exc.raw_stdout) <= MAX_EVENT_STREAM_BYTES
-        stderr_stored = len(exc.raw_stderr) <= MAX_EVENT_STREAM_BYTES
-        if raw_stored:
-            _write_private_bytes(raw_path, exc.raw_stdout)
-        if stderr_stored:
-            _write_private_bytes(stderr_path, exc.raw_stderr)
-        receipt = {
-            **exc.summary,
-            "campaign_sha256": kernel.digest(campaign),
-            "case_id": case_id,
-            "side": side,
-            "category": case["category"],
-            "budget_id": campaign["budget_id"],
-            "input_sha256": case_input_sha(campaign, case),
-            "prompt_sha256": _sha_bytes(case["prompt"].encode()),
-            "source_commit": campaign["source_commit"],
-            "codex_version": version,
-            "provider_model_identity_verified": False,
-            "completed": False,
-            "partial_stdout_stored": raw_stored,
-            "private_stderr_stored": stderr_stored,
-            "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }
+        try:
+            summary, raw = execute(model, campaign["effort"], case["prompt"], workspace,
+                                   timeout_seconds, executable)
+        except CodexRunBlocked as exc:
+            attempt_dir = _blocked_attempt_dir(evidence_dir, stem)
+            raw_path = attempt_dir / "stdout.jsonl"
+            stderr_path = attempt_dir / "stderr"
+            receipt_path = attempt_dir / "receipt.json"
+            raw_stored = len(exc.raw_stdout) <= MAX_EVENT_STREAM_BYTES
+            stderr_stored = len(exc.raw_stderr) <= MAX_EVENT_STREAM_BYTES
+            if raw_stored:
+                _write_private_bytes(raw_path, exc.raw_stdout)
+            if stderr_stored:
+                _write_private_bytes(stderr_path, exc.raw_stderr)
+            receipt = {
+                **exc.summary,
+                "campaign_sha256": kernel.digest(campaign),
+                "case_id": case_id,
+                "side": side,
+                "category": case["category"],
+                "budget_id": campaign["budget_id"],
+                "input_sha256": case_input_sha(campaign, case),
+                "prompt_sha256": _sha_bytes(case["prompt"].encode()),
+                "source_commit": campaign["source_commit"],
+                "codex_version": version,
+                "provider_model_identity_verified": False,
+                "completed": False,
+                "partial_stdout_stored": raw_stored,
+                "private_stderr_stored": stderr_stored,
+                "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+            _write_private(receipt_path, receipt)
+            exc.summary = receipt
+            exc.receipt_path = str(receipt_path)
+            exc.raw_path = str(raw_path) if raw_stored else None
+            exc.stderr_path = str(stderr_path) if stderr_stored else None
+            resolved = True
+            raise
+        raw_path = evidence_dir / (stem + ".jsonl")
+        receipt_path = evidence_dir / (stem + ".receipt.json")
+        _write_private_bytes(raw_path, raw)
+        receipt = {"schema_version": RECEIPT_SCHEMA, "campaign_sha256": kernel.digest(campaign),
+                   "case_id": case_id, "side": side, "category": case["category"],
+                   "requested_model": model, "requested_effort": campaign["effort"],
+                   "budget_id": campaign["budget_id"], "input_sha256": case_input_sha(campaign, case),
+                   "prompt_sha256": _sha_bytes(case["prompt"].encode()),
+                   "source_commit": campaign["source_commit"], "codex_version": version,
+                   "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                   "provider_model_identity_verified": False, **summary}
         _write_private(receipt_path, receipt)
-        exc.summary = receipt
-        exc.receipt_path = str(receipt_path)
-        exc.raw_path = str(raw_path) if raw_stored else None
-        exc.stderr_path = str(stderr_path) if stderr_stored else None
-        raise
-    raw_path = evidence_dir / (stem + ".jsonl")
-    receipt_path = evidence_dir / (stem + ".receipt.json")
-    _write_private_bytes(raw_path, raw)
-    receipt = {"schema_version": RECEIPT_SCHEMA, "campaign_sha256": kernel.digest(campaign),
-               "case_id": case_id, "side": side, "category": case["category"],
-               "requested_model": model, "requested_effort": campaign["effort"],
-               "budget_id": campaign["budget_id"], "input_sha256": case_input_sha(campaign, case),
-               "prompt_sha256": _sha_bytes(case["prompt"].encode()),
-               "source_commit": campaign["source_commit"], "codex_version": version,
-               "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-               "provider_model_identity_verified": False, **summary}
-    _write_private(receipt_path, receipt)
-    return {**receipt, "receipt_path": str(receipt_path), "raw_path": str(raw_path)}
+        resolved = True
+        return {**receipt, "receipt_path": str(receipt_path), "raw_path": str(raw_path)}
+    finally:
+        if resolved:
+            lock_path.unlink()
 
 
 def probe(effort: str, workspace: Path, timeout_seconds: int,

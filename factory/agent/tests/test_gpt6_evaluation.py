@@ -126,10 +126,12 @@ time.sleep(5)
         self.assertTrue(summary["turn_started_observed"])
         self.assertFalse(summary["turn_completed_observed"])
         self.assertNotIn("private-thread", json.dumps(summary))
-        receipt = evidence / "case-0.candidate.blocked.receipt.json"
-        raw = evidence / "case-0.candidate.blocked.jsonl"
+        receipt = Path(raised.exception.receipt_path)
+        raw = Path(raised.exception.raw_path)
         self.assertTrue(receipt.is_file())
         self.assertIn("private-thread", raw.read_text())
+        self.assertEqual(receipt.parent.parent, evidence / "blocked")
+        self.assertFalse((evidence / ".case-0.candidate.lock").exists())
         self.assertEqual(os.stat(receipt).st_mode & 0o777, 0o600)
         self.assertEqual(os.stat(raw).st_mode & 0o777, 0o600)
 
@@ -156,8 +158,8 @@ raise SystemExit(23)
         self.assertFalse(summary["completed"])
         self.assertNotIn("private-model-error", json.dumps(summary))
         self.assertNotIn("private-stderr-detail", json.dumps(summary))
-        raw = evidence / "case-0.candidate.blocked.jsonl"
-        stderr = evidence / "case-0.candidate.blocked.stderr"
+        raw = Path(raised.exception.raw_path)
+        stderr = Path(raised.exception.stderr_path)
         self.assertIn("private-model-error", raw.read_text())
         self.assertIn("private-stderr-detail", stderr.read_text())
         self.assertEqual(os.stat(stderr).st_mode & 0o777, 0o600)
@@ -194,9 +196,66 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
         self.assertTrue(summary["turn_completed_observed"])
         self.assertFalse(summary["completed"])
         self.assertNotIn("private-thread", json.dumps(summary))
-        raw = evidence / "case-0.candidate.blocked.jsonl"
+        raw = Path(raised.exception.raw_path)
         self.assertIn("private-thread", raw.read_text())
         self.assertEqual(os.stat(raw).st_mode & 0o777, 0o600)
+
+    def test_completed_evidence_is_never_overwritten_or_reexecuted(self):
+        evidence = self.root / "evidence"
+        first = evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+                                   evidence, 10, str(self.fake))
+        before = Path(first["receipt_path"]).read_bytes()
+        with mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaises(evaluation.kernel.Rejected):
+                evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+                                   evidence, 10, str(self.fake))
+        execute.assert_not_called()
+        self.assertEqual(Path(first["receipt_path"]).read_bytes(), before)
+
+    def test_concurrent_or_uncertain_attempt_is_not_reissued(self):
+        evidence = self.root / "evidence"
+        evidence.mkdir(mode=0o700)
+        lock = evidence / ".case-0.candidate.lock"
+        lock.write_text("existing uncertain attempt\n")
+        with mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaises(evaluation.kernel.Rejected):
+                evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+                                   evidence, 10, str(self.fake))
+        execute.assert_not_called()
+        self.assertEqual(lock.read_text(), "existing uncertain attempt\n")
+
+    def test_symlinked_evidence_directory_is_rejected_before_inference(self):
+        real = self.root / "real-evidence"
+        real.mkdir()
+        evidence = self.root / "evidence"
+        evidence.symlink_to(real, target_is_directory=True)
+        with mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaises(evaluation.kernel.Rejected):
+                evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+                                   evidence, 10, str(self.fake))
+        execute.assert_not_called()
+        self.assertEqual(list(real.iterdir()), [])
+
+    def test_blocked_retries_keep_each_private_attempt(self):
+        failed = self.root / "blocked-codex"
+        failed.write_text("""#!/usr/bin/env python3
+import json,sys
+if sys.argv[1:] == ['--version']:
+ print('codex-cli 9.9.9'); raise SystemExit
+print(json.dumps({'type':'error','message':'private'}))
+raise SystemExit(23)
+""")
+        failed.chmod(0o755)
+        evidence = self.root / "evidence"
+        receipts = []
+        for _ in range(2):
+            with self.assertRaises(evaluation.CodexRunBlocked) as raised:
+                evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+                                   evidence, 10, str(failed))
+            receipts.append(Path(raised.exception.receipt_path))
+        self.assertNotEqual(receipts[0].parent, receipts[1].parent)
+        self.assertTrue(all(path.is_file() for path in receipts))
+        self.assertFalse((evidence / ".case-0.candidate.lock").exists())
 
     def test_completion_without_thread_id_is_blocked(self):
         events = b"\n".join((
