@@ -43,9 +43,11 @@ class EvaluationTests(unittest.TestCase):
         self.campaign_path.write_text(json.dumps(self.campaign))
         self.fake = self.root / "codex"
         self.fake.write_text("""#!/usr/bin/env python3
-import json,sys
+import json,os,sys
 if sys.argv[1:] == ['--version']:
  print('codex-cli 9.9.9'); raise SystemExit
+if not os.isatty(0):
+ print('Codex received non-terminal stdin', file=sys.stderr); raise SystemExit(98)
 print(json.dumps({'type':'thread.started','thread_id':'test-thread'}))
 print(json.dumps({'type':'turn.started'}))
 print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'GPT6_ACCESS_PROBE_OK'}}))
@@ -88,13 +90,13 @@ raise SystemExit(99)
         with self.assertRaises(evaluation.IncompatibleCodexCli):
             evaluation.probe("high", self.root, 10, str(old))
 
-    def test_probe_closes_stdin_for_noninteractive_codex(self):
+    def test_probe_uses_terminal_stdin_for_noninteractive_codex(self):
         with mock.patch.object(evaluation.subprocess, "run",
                                wraps=evaluation.subprocess.run) as run:
             evaluation.probe("high", self.root, 10, str(self.fake))
         self.assertEqual(len(run.call_args_list), 2)
-        for invocation in run.call_args_list:
-            self.assertIs(invocation.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertIs(run.call_args_list[0].kwargs["stdin"], subprocess.DEVNULL)
+        self.assertIsInstance(run.call_args_list[1].kwargs["stdin"], int)
 
     def test_collect_uses_frozen_pair_and_private_files(self):
         evidence = self.root / "evidence"

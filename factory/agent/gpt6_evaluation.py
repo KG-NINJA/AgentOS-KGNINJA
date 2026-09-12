@@ -270,19 +270,27 @@ def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_secon
                "-a", "never", "exec", "--json", "--ephemeral", "--ignore-user-config",
                "--sandbox", "read-only", "--skip-git-repo-check", "-C", str(workspace.resolve()), prompt]
     started = time.monotonic_ns()
-    # Codex treats piped stdin as additional context even when a prompt argument
-    # is present.  Long-running hosts commonly keep fd 0 open, so inheriting it
-    # can leave a non-interactive evaluation waiting forever for EOF.
+    # Codex treats every non-terminal stdin as additional prompt input, including
+    # /dev/null. Give it an otherwise unused pseudo-terminal so a prompt supplied
+    # as an argument never enters that reader in an automated host.
     try:
-        result = subprocess.run(command, capture_output=True, stdin=subprocess.DEVNULL,
-                                timeout=timeout_seconds)
-    except subprocess.TimeoutExpired as exc:
-        latency_ms = (time.monotonic_ns() - started) / 1_000_000
-        raw_stdout = _output_bytes(exc.stdout)
-        raw_stderr = _output_bytes(exc.stderr)
-        summary = _blocked_summary("timeout", model, effort, timeout_seconds,
-                                   latency_ms, raw_stdout, raw_stderr, None)
-        raise CodexRunBlocked(summary, raw_stdout, raw_stderr) from exc
+        master_fd, slave_fd = os.openpty()
+    except OSError as exc:
+        raise kernel.Rejected("unable to create terminal stdin for Codex") from exc
+    try:
+        try:
+            result = subprocess.run(command, capture_output=True, stdin=slave_fd,
+                                    timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            latency_ms = (time.monotonic_ns() - started) / 1_000_000
+            raw_stdout = _output_bytes(exc.stdout)
+            raw_stderr = _output_bytes(exc.stderr)
+            summary = _blocked_summary("timeout", model, effort, timeout_seconds,
+                                       latency_ms, raw_stdout, raw_stderr, None)
+            raise CodexRunBlocked(summary, raw_stdout, raw_stderr) from exc
+    finally:
+        os.close(slave_fd)
+        os.close(master_fd)
     latency_ms = (time.monotonic_ns() - started) / 1_000_000
     raw_stdout = _output_bytes(result.stdout)
     raw_stderr = _output_bytes(result.stderr)

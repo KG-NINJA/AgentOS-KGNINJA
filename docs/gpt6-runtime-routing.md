@@ -124,7 +124,10 @@ python3 factory/agent/gpt6_evaluation.py collect --campaign campaign.json \
 Receipts and raw JSONL are written under ignored `runtime/` storage with directory
 mode 0700 and file mode 0600. The collector records requested model/effort, frozen
 input and prompt hashes, Codex version, event hash, latency and token usage. It
-does not estimate cost or judge its own output. Each case/side is claimed before
+does not estimate cost or judge its own output. Model subprocesses receive an
+unused pseudo-terminal on stdin because Codex treats every non-terminal stdin,
+including `/dev/null`, as additional prompt input; the actual prompt remains the
+explicit CLI argument. Each case/side is claimed before
 inference: a concurrent or crash-left claim blocks reissue, and completed or
 partially written success evidence is never overwritten. Reconcile an uncertain
 claim before retrying. Failed attempts are retained in separate private directories
