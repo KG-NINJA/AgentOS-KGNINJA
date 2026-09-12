@@ -1,0 +1,22 @@
+{
+  "policy": {
+    "schema_version": "revenue-controller/0.2",
+    "synthetic": false,
+    "sources": [],
+    "repositories": [],
+    "publication_targets": [],
+    "cash_cap_microusd": 0,
+    "work_cap_minutes": 120,
+    "human_cap_minutes": 60,
+    "approval_seconds": 900,
+    "lease_seconds": 900,
+    "fresh_seconds": 60,
+    "allow_publication": false,
+    "adapter_fingerprints": {}
+  },
+  "credentials_file": "/private/revenue/credentials.json",
+  "source_adapters": {},
+  "verifier_profiles": {},
+  "publisher": null,
+  "payments": null
+}

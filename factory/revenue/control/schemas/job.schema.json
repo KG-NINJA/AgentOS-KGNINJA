@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Server-issued bounded engineering job",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0"
+    },
+    "is_synthetic": {
+      "type": "boolean"
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "opportunity_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "source_snapshot_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "policy_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "authorization_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40,64}$"
+        }
+      },
+      "required": [
+        "url",
+        "commit"
+      ]
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000
+      },
+      "maxItems": 30,
+      "uniqueItems": true
+    },
+    "allowed_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000
+      },
+      "maxItems": 30,
+      "uniqueItems": true
+    },
+    "denied_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000
+      },
+      "maxItems": 30,
+      "uniqueItems": true
+    },
+    "allowed_side_effects": {
+      "type": "array",
+      "items": {
+        "const": "LOCAL_FILES_ONLY"
+      },
+      "minItems": 1,
+      "maxItems": 1
+    },
+    "resource_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_wall_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 14400
+        },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "incremental_cash_cap_microusd": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "max_changed_files": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "max_wall_seconds",
+        "max_attempts",
+        "incremental_cash_cap_microusd",
+        "max_changed_files"
+      ]
+    },
+    "network_policy": {
+      "enum": [
+        "DENY_TEST_NETWORK_APPROVED_MODEL_PROXY_ONLY"
+      ]
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "artifact_namespace": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "required_result_schema": {
+      "const": "execution-result.schema.json"
+    }
+  },
+  "required": [
+    "schema_version",
+    "is_synthetic",
+    "job_id",
+    "opportunity_key",
+    "source_snapshot_sha256",
+    "policy_sha256",
+    "authorization_ref",
+    "repo",
+    "objective",
+    "acceptance_criteria",
+    "allowed_paths",
+    "denied_paths",
+    "allowed_side_effects",
+    "resource_limits",
+    "network_policy",
+    "issued_at",
+    "expires_at",
+    "artifact_namespace",
+    "required_result_schema"
+  ]
+}

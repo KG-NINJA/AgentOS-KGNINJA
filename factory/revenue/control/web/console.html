@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Revenue Controller</title>
+<link rel="stylesheet" href="/console.css"><script src="/console.js" defer></script>
+<body><main><h1>Revenue Controller</h1><p id="purpose"></p>
+<nav><a href="/owner">所有者の承認</a><a href="/agent">作業状況</a></nav>
+<form id="login"><label>専用のアクセストークン <input id="token" type="password" autocomplete="off" required></label><button>接続</button></form>
+<p id="identity"></p><p id="error" role="alert"></p>
+<section id="connected" hidden><button id="refresh">状態を更新</button><button id="logout">切断</button>
+<h2>収支と稼働状態</h2><p>入金、納品済みの受領額、未払いを分けて表示します。通貨換算と全費用の根拠が揃うまで利益は未確定です。</p><pre id="summary"></pre>
+<section id="owner-controls" hidden><h2>稼働管理</h2><label>確認記録 <input id="review-ref" placeholder="確認した記録の識別子"></label>
+<button id="stop">新規作業を停止</button><button id="resume">確認した範囲で再開</button>
+<h2>期間予算</h2><p>追加支出・作業時間・確認時間の上限を予約します。根拠不明の費用をゼロとは扱いません。</p>
+<form id="budget"><label>追加支出上限（microUSD）<input id="cash" type="number" min="0" value="0" required></label>
+<label>作業時間上限（分）<input id="work" type="number" min="0" max="120" value="120" required></label>
+<label>確認時間上限（分）<input id="human" type="number" min="0" max="60" value="60" required></label><button>今から24時間の予算を設定</button></form>
+</section><h2>承認待ちの提案</h2><div id="proposals"></div>
+<h2>観測した案件</h2><pre id="opportunities"></pre></section>
+</main></body></html>
