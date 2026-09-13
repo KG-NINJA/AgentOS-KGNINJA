@@ -46,6 +46,8 @@ class EvaluationTests(unittest.TestCase):
 import json,os,sys
 if sys.argv[1:] == ['--version']:
  print('codex-cli 9.9.9'); raise SystemExit
+if sys.argv[1:] == ['login','status']:
+ print('Logged in using ChatGPT'); raise SystemExit
 if not os.isatty(0):
  print('Codex received non-terminal stdin', file=sys.stderr); raise SystemExit(98)
 print(json.dumps({'type':'thread.started','thread_id':'test-thread'}))
@@ -76,7 +78,25 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
         result = evaluation.probe("high", self.root, 10, str(self.fake))
         self.assertTrue(result["requested_model_call_completed"])
         self.assertEqual(result["requested_model"], "gpt-6-astra")
+        self.assertEqual(result["auth_surface"], "chatgpt")
         self.assertFalse(result["provider_model_identity_verified"])
+
+    def test_auth_surface_classifier_never_returns_status_payload(self):
+        secret = b"Logged in as private@example.invalid with token sk-private"
+        completed = subprocess.CompletedProcess([], 0, secret, b"")
+        with mock.patch.object(evaluation.subprocess, "run", return_value=completed):
+            result = evaluation._codex_auth_surface(str(self.fake))
+        self.assertEqual(result, "unknown")
+        self.assertNotIn("private", result)
+
+    def test_auth_surface_classifier_distinguishes_billing_scope(self):
+        for output, expected in ((b"Logged in using ChatGPT", "chatgpt"),
+                                 (b"Logged in using API key", "api_key"),
+                                 (b"Logged in using personal access token", "access_token")):
+            completed = subprocess.CompletedProcess([], 0, output, b"")
+            with self.subTest(expected=expected), \
+                    mock.patch.object(evaluation.subprocess, "run", return_value=completed):
+                self.assertEqual(evaluation._codex_auth_surface(str(self.fake)), expected)
 
     def test_probe_rejects_old_cli_before_model_call(self):
         old = self.root / "old-codex"
@@ -94,9 +114,10 @@ raise SystemExit(99)
         with mock.patch.object(evaluation.subprocess, "run",
                                wraps=evaluation.subprocess.run) as run:
             evaluation.probe("high", self.root, 10, str(self.fake))
-        self.assertEqual(len(run.call_args_list), 2)
+        self.assertEqual(len(run.call_args_list), 3)
         self.assertIs(run.call_args_list[0].kwargs["stdin"], subprocess.DEVNULL)
-        self.assertIsInstance(run.call_args_list[1].kwargs["stdin"], int)
+        self.assertIs(run.call_args_list[1].kwargs["stdin"], subprocess.DEVNULL)
+        self.assertIsInstance(run.call_args_list[2].kwargs["stdin"], int)
 
     def test_collect_uses_frozen_pair_and_private_files(self):
         evidence = self.root / "evidence"
@@ -113,6 +134,8 @@ raise SystemExit(99)
 import json,sys,time
 if sys.argv[1:] == ['--version']:
  print('codex-cli 9.9.9'); raise SystemExit
+if sys.argv[1:] == ['login','status']:
+ print('Logged in using ChatGPT'); raise SystemExit
 print(json.dumps({'type':'thread.started','thread_id':'private-thread'}), flush=True)
 print(json.dumps({'type':'turn.started'}), flush=True)
 time.sleep(5)
@@ -143,6 +166,8 @@ time.sleep(5)
 import json,sys
 if sys.argv[1:] == ['--version']:
  print('codex-cli 9.9.9'); raise SystemExit
+if sys.argv[1:] == ['login','status']:
+ print('Logged in using ChatGPT'); raise SystemExit
 print(json.dumps({'type':'thread.started','thread_id':'private-thread'}))
 print(json.dumps({'type':'error','message':'private-model-error'}))
 print('private-stderr-detail', file=sys.stderr)
@@ -184,6 +209,8 @@ raise SystemExit(23)
 import json,sys
 if sys.argv[1:] == ['--version']:
  print('codex-cli 9.9.9'); raise SystemExit
+if sys.argv[1:] == ['login','status']:
+ print('Logged in using ChatGPT'); raise SystemExit
 print(json.dumps({'type':'thread.started','thread_id':'private-thread'}))
 print(json.dumps({'type':'turn.started'}))
 print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
@@ -244,6 +271,8 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
 import json,sys
 if sys.argv[1:] == ['--version']:
  print('codex-cli 9.9.9'); raise SystemExit
+if sys.argv[1:] == ['login','status']:
+ print('Logged in using ChatGPT'); raise SystemExit
 print(json.dumps({'type':'error','message':'private'}))
 raise SystemExit(23)
 """)
@@ -325,6 +354,15 @@ raise SystemExit(23)
         self.assertFalse(output["gate"]["activated"])
         self.assertFalse(output["gate"]["provider_authenticity_verified"])
         self.assertIn("no_10_percent_operational_improvement", output["gate"]["reasons"])
+        receipt_path = evidence / "case-0.candidate.receipt.json"
+        receipt = json.loads(receipt_path.read_text())
+        receipt["auth_surface"] = "api_key"
+        receipt_path.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "authentication surface changed"):
+            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+        receipt["auth_surface"] = "chatgpt"
+        receipt_path.write_text(json.dumps(receipt))
         grades.pop()
         grade_path.write_text(json.dumps({"schema_version": "gpt6-evaluation-grades.v1",
                                           "campaign_sha256": evaluation.kernel.digest(self.campaign),

@@ -26,9 +26,10 @@ import work_kernel as kernel  # noqa: E402
 from codex_runtime import IncompatibleCodexCli, require_gpt6_cli  # noqa: E402
 
 SCHEMA = "gpt6-evaluation.v1"
-RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v1"
+RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v2"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
+AUTH_SURFACES = {"chatgpt", "api_key", "access_token", "workload_identity"}
 COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 PROBE_PROMPT = "Reply with exactly: GPT6_ACCESS_PROBE_OK. Do not call tools."
 MAX_EVENT_STREAM_BYTES = 16 * 1024 * 1024
@@ -180,6 +181,28 @@ def verify_workspace(workspace: Path, source_commit: str) -> None:
 
 def _codex_version(executable: str) -> str:
     return require_gpt6_cli(executable)
+
+
+def _codex_auth_surface(executable: str) -> str:
+    """Return only a coarse auth class; never retain CLI account output."""
+    try:
+        result = subprocess.run([executable, "login", "status"], capture_output=True,
+                                stdin=subprocess.DEVNULL, timeout=10)
+    except subprocess.TimeoutExpired:
+        return "unknown"
+    if result.returncode:
+        return "not_authenticated"
+    status = b" ".join((_output_bytes(result.stdout),
+                        _output_bytes(result.stderr))).lower()
+    if b"api key" in status or b"api-key" in status or b"apikey" in status:
+        return "api_key"
+    if b"access token" in status:
+        return "access_token"
+    if b"workload identity" in status:
+        return "workload_identity"
+    if b"chatgpt" in status:
+        return "chatgpt"
+    return "unknown"
 
 
 def _parse_events(raw: bytes) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -336,6 +359,7 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
     verify_workspace(workspace, campaign["source_commit"])
     model = campaign[side + "_model"]
     version = _codex_version(executable)
+    auth_surface = _codex_auth_surface(executable)
     stem = case_id + "." + side
     lock_path = _claim_attempt(evidence_dir, stem)
     resolved = False
@@ -365,6 +389,7 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
                 "prompt_sha256": _sha_bytes(case["prompt"].encode()),
                 "source_commit": campaign["source_commit"],
                 "codex_version": version,
+                "auth_surface": auth_surface,
                 "provider_model_identity_verified": False,
                 "completed": False,
                 "partial_stdout_stored": raw_stored,
@@ -387,6 +412,7 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
                    "budget_id": campaign["budget_id"], "input_sha256": case_input_sha(campaign, case),
                    "prompt_sha256": _sha_bytes(case["prompt"].encode()),
                    "source_commit": campaign["source_commit"], "codex_version": version,
+                   "auth_surface": auth_surface,
                    "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                    "provider_model_identity_verified": False, **summary}
         _write_private(receipt_path, receipt)
@@ -400,16 +426,19 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
 def probe(effort: str, workspace: Path, timeout_seconds: int,
           executable: str = "codex") -> dict[str, Any]:
     version = _codex_version(executable)
+    auth_surface = _codex_auth_surface(executable)
     try:
         summary, _ = execute("gpt-6-astra", effort, PROBE_PROMPT, workspace,
                              timeout_seconds, executable)
     except CodexRunBlocked as exc:
         exc.summary["codex_version"] = version
+        exc.summary["auth_surface"] = auth_surface
         raise
     if summary["final_message_sha256"] != _sha_bytes(b"GPT6_ACCESS_PROBE_OK"):
         raise kernel.Rejected("Codex probe response mismatch")
-    return {"schema_version": "gpt6-access-probe.v1", "requested_model": "gpt-6-astra",
+    return {"schema_version": "gpt6-access-probe.v2", "requested_model": "gpt-6-astra",
             "requested_effort": effort, "codex_version": version,
+            "auth_surface": auth_surface,
             "requested_model_call_completed": True,
             "provider_model_identity_verified": False,
             "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **summary}
@@ -440,6 +469,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
             raise kernel.Rejected("missing evaluator reference")
         grade_map[key] = grade
     pairs = []
+    campaign_auth_surface: str | None = None
     for case in campaign["cases"]:
         pair = {"id": case["id"], "input_sha256": case_input_sha(campaign, case),
                 "category": case["category"], "budget_id": campaign["budget_id"]}
@@ -449,7 +479,8 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
             receipt = kernel.load_json(receipt_path)
             expected = {"schema_version", "campaign_sha256", "case_id", "side", "category",
                         "requested_model", "requested_effort", "budget_id", "input_sha256",
-                        "prompt_sha256", "source_commit", "codex_version", "observed_at",
+                        "prompt_sha256", "source_commit", "codex_version", "auth_surface",
+                        "observed_at",
                         "provider_model_identity_verified", "completed", "latency_ms", "input_tokens",
                         "cached_input_tokens", "output_tokens", "reasoning_output_tokens",
                         "thread_id_sha256", "final_message_sha256", "event_stream_sha256"}
@@ -464,8 +495,13 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
                     or receipt["input_sha256"] != pair["input_sha256"]
                     or receipt["prompt_sha256"] != _sha_bytes(case["prompt"].encode())
                     or receipt["source_commit"] != campaign["source_commit"]
+                    or receipt["auth_surface"] not in AUTH_SURFACES
                     or receipt["provider_model_identity_verified"] is not False):
                 raise kernel.Rejected("receipt does not match campaign")
+            if campaign_auth_surface is None:
+                campaign_auth_surface = receipt["auth_surface"]
+            elif receipt["auth_surface"] != campaign_auth_surface:
+                raise kernel.Rejected("campaign authentication surface changed")
             raw = raw_path.read_bytes()
             _parse_events(raw)
             if _sha_bytes(raw) != receipt["event_stream_sha256"]:
@@ -487,7 +523,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
     report = {"baseline_model": campaign["baseline_model"],
               "candidate_model": campaign["candidate_model"], "pairs": pairs}
     return {"report": report, "gate": kernel.migration_gate(report),
-            "provider_authenticity_note": "CLI receipts record requested models; independent provider identity remains unverified."}
+            "provider_authenticity_note": "CLI receipts record requested models and coarse authentication surfaces; independent provider identity and entitlement remain unverified."}
 
 
 def main() -> int:
@@ -537,7 +573,7 @@ def main() -> int:
             stderr_stored = len(exc.raw_stderr) <= MAX_EVENT_STREAM_BYTES
             receipt = {
                 **exc.summary,
-                "schema_version": "gpt6-access-probe-blocked.v1",
+                "schema_version": "gpt6-access-probe-blocked.v2",
                 "provider_model_identity_verified": False,
                 "requested_model_call_completed": False,
                 "partial_stdout_stored": raw_stored,

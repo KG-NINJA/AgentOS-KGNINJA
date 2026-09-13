@@ -44,6 +44,13 @@ For ChatGPT-authenticated Codex, OpenAI also lists the legacy generator's
 first inspect the target host's authentication and effective model, then choose a
 supported baseline for the matched campaign. API-key availability is a separate
 case and must be verified on the host rather than inferred from this document.
+OpenAI's authentication contract also gives ChatGPT, API-key and Codex access-token
+sessions different entitlement, billing and administrative scopes. The probe and
+collector therefore run `codex login status` and retain only a coarse
+`auth_surface`; they never retain its account-oriented stdout or stderr. A compiled
+campaign requires one recognized authentication surface across every baseline and
+candidate receipt. Unknown, unauthenticated or mixed surfaces cannot become a
+matched comparison.
 
 Candidate generation failures do not fall back to successful local scaffolding.
 Candidate interpretation failures cannot become successful heuristic output.
@@ -123,7 +130,8 @@ python3 factory/agent/gpt6_evaluation.py collect --campaign campaign.json \
 
 Receipts and raw JSONL are written under ignored `runtime/` storage with directory
 mode 0700 and file mode 0600. The collector records requested model/effort, frozen
-input and prompt hashes, Codex version, event hash, latency and token usage. It
+input and prompt hashes, Codex version, coarse authentication surface, event hash,
+latency and token usage. It
 does not estimate cost or judge its own output. Model subprocesses receive an
 unused pseudo-terminal on stdin because Codex treats every non-terminal stdin,
 including `/dev/null`, as additional prompt input; the actual prompt remains the
@@ -132,6 +140,8 @@ inference: a concurrent or crash-left claim blocks reissue, and completed or
 partially written success evidence is never overwritten. Reconcile an uncertain
 claim before retrying. Failed attempts are retained in separate private directories
 under `blocked/`, so an explicit retry cannot erase the earlier diagnosis.
+Receipt schema v2 adds this authentication condition. Retain any v1 receipts as
+historical evidence rather than rewriting or mixing them into a v2 campaign.
 Supply a separate
 `gpt6-evaluation-grades.v1` file with safety, correctness, evidence coverage,
 actual cost and evaluator references for all 60 or more runs, then compile:
@@ -152,12 +162,15 @@ affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-10
+## Official basis, checked 2026-09-13
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference
 - https://developers.openai.com/api/docs/guides/latest-model
 - https://learn.chatgpt.com/docs/non-interactive-mode
+- https://learn.chatgpt.com/docs/auth
+- https://learn.chatgpt.com/docs/developer-commands
+- https://learn.chatgpt.com/docs/enterprise/access-tokens
 - https://developers.openai.com/api/docs/models/gpt-6-astra
 - https://learn.chatgpt.com/docs/changelog
 
