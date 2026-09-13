@@ -29,7 +29,7 @@ SCHEMA = "gpt6-evaluation.v1"
 RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v2"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
-AUTH_SURFACES = {"chatgpt", "api_key", "access_token", "workload_identity"}
+AUTH_SURFACES = {"chatgpt", "api_key", "access_token"}
 COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 PROBE_PROMPT = "Reply with exactly: GPT6_ACCESS_PROBE_OK. Do not call tools."
 MAX_EVENT_STREAM_BYTES = 16 * 1024 * 1024
@@ -360,6 +360,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
     model = campaign[side + "_model"]
     version = _codex_version(executable)
     auth_surface = _codex_auth_surface(executable)
+    if auth_surface not in AUTH_SURFACES:
+        raise kernel.Rejected("recognized Codex authentication is required")
     stem = case_id + "." + side
     lock_path = _claim_attempt(evidence_dir, stem)
     resolved = False
@@ -427,6 +429,8 @@ def probe(effort: str, workspace: Path, timeout_seconds: int,
           executable: str = "codex") -> dict[str, Any]:
     version = _codex_version(executable)
     auth_surface = _codex_auth_surface(executable)
+    if auth_surface not in AUTH_SURFACES:
+        raise kernel.Rejected("recognized Codex authentication is required")
     try:
         summary, _ = execute("gpt-6-astra", effort, PROBE_PROMPT, workspace,
                              timeout_seconds, executable)

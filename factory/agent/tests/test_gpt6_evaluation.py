@@ -98,6 +98,14 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
                     mock.patch.object(evaluation.subprocess, "run", return_value=completed):
                 self.assertEqual(evaluation._codex_auth_surface(str(self.fake)), expected)
 
+    def test_probe_rejects_unknown_auth_before_model_call(self):
+        with mock.patch.object(evaluation, "_codex_auth_surface", return_value="unknown"), \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                        "recognized Codex authentication"):
+                evaluation.probe("high", self.root, 10, str(self.fake))
+        execute.assert_not_called()
+
     def test_probe_rejects_old_cli_before_model_call(self):
         old = self.root / "old-codex"
         old.write_text("""#!/usr/bin/env python3

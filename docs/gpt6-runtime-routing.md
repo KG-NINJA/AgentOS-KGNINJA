@@ -49,8 +49,10 @@ sessions different entitlement, billing and administrative scopes. The probe and
 collector therefore run `codex login status` and retain only a coarse
 `auth_surface`; they never retain its account-oriented stdout or stderr. A compiled
 campaign requires one recognized authentication surface across every baseline and
-candidate receipt. Unknown, unauthenticated or mixed surfaces cannot become a
-matched comparison.
+candidate receipt. Unknown or unauthenticated status stops before inference, and
+mixed surfaces cannot become a matched comparison. Workload identity requires a
+separate reviewed integration because the CLI rejects login management commands
+when that environment-controlled method is active.
 
 Candidate generation failures do not fall back to successful local scaffolding.
 Candidate interpretation failures cannot become successful heuristic output.
