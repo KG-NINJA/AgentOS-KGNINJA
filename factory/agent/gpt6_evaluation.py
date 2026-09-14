@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[2]
 KERNEL_DIR = ROOT / ".agents/skills/gpt6-work-platform/scripts"
 sys.path.insert(0, str(KERNEL_DIR))
 import work_kernel as kernel  # noqa: E402
-from codex_runtime import IncompatibleCodexCli, require_gpt6_cli  # noqa: E402
+from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
+                           IncompatibleCodexCli, require_gpt6_cli)  # noqa: E402
 
 SCHEMA = "gpt6-evaluation.v1"
 RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v2"
@@ -181,6 +182,16 @@ def verify_workspace(workspace: Path, source_commit: str) -> None:
 
 def _codex_version(executable: str) -> str:
     return require_gpt6_cli(executable)
+
+
+def _validated_codex_version(value: Any) -> str:
+    """Validate a recorded version without invoking or trusting the current CLI."""
+    if type(value) is not str:
+        raise kernel.Rejected("receipt Codex CLI version is invalid")
+    match = CODEX_VERSION.fullmatch(value)
+    if match is None or tuple(int(part) for part in match.groups()) < MIN_GPT6_CODEX_VERSION:
+        raise kernel.Rejected("receipt Codex CLI version is incompatible")
+    return value
 
 
 def _codex_auth_surface(executable: str) -> str:
@@ -474,6 +485,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
         grade_map[key] = grade
     pairs = []
     campaign_auth_surface: str | None = None
+    campaign_codex_version: str | None = None
     for case in campaign["cases"]:
         pair = {"id": case["id"], "input_sha256": case_input_sha(campaign, case),
                 "category": case["category"], "budget_id": campaign["budget_id"]}
@@ -490,6 +502,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
                         "thread_id_sha256", "final_message_sha256", "event_stream_sha256"}
             if type(receipt) is not dict or set(receipt) != expected:
                 raise kernel.Rejected("invalid receipt schema")
+            receipt_codex_version = _validated_codex_version(receipt["codex_version"])
             if (receipt["schema_version"] != RECEIPT_SCHEMA or receipt["campaign_sha256"] != kernel.digest(campaign)
                     or receipt["case_id"] != case["id"] or receipt["side"] != side
                     or receipt["category"] != case["category"]
@@ -506,6 +519,10 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
                 campaign_auth_surface = receipt["auth_surface"]
             elif receipt["auth_surface"] != campaign_auth_surface:
                 raise kernel.Rejected("campaign authentication surface changed")
+            if campaign_codex_version is None:
+                campaign_codex_version = receipt_codex_version
+            elif receipt_codex_version != campaign_codex_version:
+                raise kernel.Rejected("campaign Codex CLI version changed")
             raw = raw_path.read_bytes()
             _parse_events(raw)
             if _sha_bytes(raw) != receipt["event_stream_sha256"]:
@@ -527,6 +544,8 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
     report = {"baseline_model": campaign["baseline_model"],
               "candidate_model": campaign["candidate_model"], "pairs": pairs}
     return {"report": report, "gate": kernel.migration_gate(report),
+            "comparison_conditions": {"codex_version": campaign_codex_version,
+                                      "auth_surface": campaign_auth_surface},
             "provider_authenticity_note": "CLI receipts record requested models and coarse authentication surfaces; independent provider identity and entitlement remain unverified."}
 
 

@@ -362,6 +362,8 @@ raise SystemExit(23)
         self.assertFalse(output["gate"]["activated"])
         self.assertFalse(output["gate"]["provider_authenticity_verified"])
         self.assertIn("no_10_percent_operational_improvement", output["gate"]["reasons"])
+        self.assertEqual(output["comparison_conditions"],
+                         {"codex_version": "codex-cli 9.9.9", "auth_surface": "chatgpt"})
         receipt_path = evidence / "case-0.candidate.receipt.json"
         receipt = json.loads(receipt_path.read_text())
         receipt["auth_surface"] = "api_key"
@@ -370,6 +372,18 @@ raise SystemExit(23)
                                     "authentication surface changed"):
             evaluation.compile_report(self.campaign_path, evidence, grade_path)
         receipt["auth_surface"] = "chatgpt"
+        receipt_path.write_text(json.dumps(receipt))
+        receipt["codex_version"] = "codex-cli 0.152.0"
+        receipt_path.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "Codex CLI version is incompatible"):
+            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+        receipt["codex_version"] = "codex-cli 9.9.8"
+        receipt_path.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "Codex CLI version changed"):
+            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+        receipt["codex_version"] = "codex-cli 9.9.9"
         receipt_path.write_text(json.dumps(receipt))
         grades.pop()
         grade_path.write_text(json.dumps({"schema_version": "gpt6-evaluation-grades.v1",

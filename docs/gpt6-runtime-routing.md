@@ -154,7 +154,11 @@ python3 factory/agent/gpt6_evaluation.py compile --campaign campaign.json \
 ```
 
 Compilation rejects missing, extra, mismatched or stale pairs and passes only the
-assembled report to the existing migration gate. Even an eligible result remains
+assembled report to the existing migration gate. It also rejects a campaign that
+mixes Codex CLI versions, even when every individual version supports GPT-6, and
+returns the single fixed CLI version and authentication surface as explicit
+comparison conditions. This prevents a client upgrade during collection from
+being mistaken for a model-only difference. Even an eligible result remains
 operator review material: it cannot activate production or verify provider
 authenticity. Do not commit prompts, raw outputs, grades or runtime receipts.
 
@@ -164,7 +168,7 @@ affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-13
+## Official basis, checked 2026-09-14
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference
