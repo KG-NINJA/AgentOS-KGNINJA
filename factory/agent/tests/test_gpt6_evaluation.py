@@ -30,13 +30,15 @@ class EvaluationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.root, check=True)
-        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=self.root, check=True)
-        subprocess.run(["git", "config", "user.name", "Test"], cwd=self.root, check=True)
-        (self.root / "fixture.txt").write_text("frozen\n")
-        subprocess.run(["git", "add", "fixture.txt"], cwd=self.root, check=True)
-        subprocess.run(["git", "commit", "-qm", "fixture"], cwd=self.root, check=True)
-        self.commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root,
+        self.workspace = self.root / "workspace"
+        self.workspace.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.workspace, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=self.workspace, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=self.workspace, check=True)
+        (self.workspace / "fixture.txt").write_text("frozen\n")
+        subprocess.run(["git", "add", "fixture.txt"], cwd=self.workspace, check=True)
+        subprocess.run(["git", "commit", "-qm", "fixture"], cwd=self.workspace, check=True)
+        self.commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.workspace,
                                      check=True, capture_output=True, text=True).stdout.strip()
         self.campaign = campaign(self.commit)
         self.campaign_path = self.root / "campaign.json"
@@ -70,12 +72,17 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
             evaluation.load_campaign(path)
 
     def test_dirty_or_wrong_workspace_is_rejected(self):
-        (self.root / "fixture.txt").write_text("changed\n")
+        (self.workspace / "fixture.txt").write_text("changed\n")
         with self.assertRaises(evaluation.kernel.Rejected):
-            evaluation.verify_workspace(self.root, self.commit)
+            evaluation.verify_workspace(self.workspace, self.commit)
+
+    def test_untracked_workspace_input_is_rejected(self):
+        (self.workspace / "untracked.txt").write_text("not frozen\n")
+        with self.assertRaises(evaluation.kernel.Rejected):
+            evaluation.verify_workspace(self.workspace, self.commit)
 
     def test_probe_records_requested_not_verified_model(self):
-        result = evaluation.probe("high", self.root, 10, str(self.fake))
+        result = evaluation.probe("high", self.workspace, 10, str(self.fake))
         self.assertTrue(result["requested_model_call_completed"])
         self.assertEqual(result["requested_model"], "gpt-6-astra")
         self.assertEqual(result["auth_surface"], "chatgpt")
@@ -103,7 +110,7 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
                 mock.patch.object(evaluation, "execute") as execute:
             with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                         "recognized Codex authentication"):
-                evaluation.probe("high", self.root, 10, str(self.fake))
+                evaluation.probe("high", self.workspace, 10, str(self.fake))
         execute.assert_not_called()
 
     def test_probe_rejects_old_cli_before_model_call(self):
@@ -116,12 +123,12 @@ raise SystemExit(99)
 """)
         old.chmod(0o755)
         with self.assertRaises(evaluation.IncompatibleCodexCli):
-            evaluation.probe("high", self.root, 10, str(old))
+            evaluation.probe("high", self.workspace, 10, str(old))
 
     def test_probe_uses_terminal_stdin_for_noninteractive_codex(self):
         with mock.patch.object(evaluation.subprocess, "run",
                                wraps=evaluation.subprocess.run) as run:
-            evaluation.probe("high", self.root, 10, str(self.fake))
+            evaluation.probe("high", self.workspace, 10, str(self.fake))
         self.assertEqual(len(run.call_args_list), 3)
         self.assertIs(run.call_args_list[0].kwargs["stdin"], subprocess.DEVNULL)
         self.assertIs(run.call_args_list[1].kwargs["stdin"], subprocess.DEVNULL)
@@ -129,12 +136,30 @@ raise SystemExit(99)
 
     def test_collect_uses_frozen_pair_and_private_files(self):
         evidence = self.root / "evidence"
-        result = evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+        result = evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
                                     evidence, 10, str(self.fake))
         self.assertEqual(result["requested_model"], "gpt-6-astra")
         self.assertEqual(result["source_commit"], self.commit)
         self.assertEqual(os.stat(evidence).st_mode & 0o777, 0o700)
         self.assertEqual(os.stat(evidence / "case-0.candidate.receipt.json").st_mode & 0o777, 0o600)
+
+    def test_workspace_drift_during_execution_is_not_promoted(self):
+        evidence = self.root / "evidence"
+        real_execute = evaluation.execute
+
+        def execute_then_mutate(*args, **kwargs):
+            result = real_execute(*args, **kwargs)
+            (self.workspace / "fixture.txt").write_text("changed during execution\n")
+            return result
+
+        with mock.patch.object(evaluation, "execute", side_effect=execute_then_mutate):
+            with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                        "workspace must be clean"):
+                evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
+                                   evidence, 10, str(self.fake))
+        self.assertTrue((evidence / ".case-0.candidate.lock").is_file())
+        self.assertFalse((evidence / "case-0.candidate.receipt.json").exists())
+        self.assertFalse((evidence / "case-0.candidate.jsonl").exists())
 
     def test_timeout_preserves_private_partial_evidence_without_counting_completion(self):
         slow = self.root / "slow-codex"
@@ -151,7 +176,7 @@ time.sleep(5)
         slow.chmod(0o755)
         evidence = self.root / "evidence"
         with self.assertRaises(evaluation.CodexRunBlocked) as raised:
-            evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+            evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
                                evidence, 1, str(slow))
         summary = raised.exception.summary
         self.assertFalse(summary["completed"])
@@ -184,7 +209,7 @@ raise SystemExit(23)
         failed.chmod(0o755)
         evidence = self.root / "evidence"
         with self.assertRaises(evaluation.CodexRunBlocked) as raised:
-            evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+            evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
                                evidence, 10, str(failed))
         summary = raised.exception.summary
         self.assertEqual(summary["reason"], "process-failure")
@@ -204,7 +229,7 @@ raise SystemExit(23)
         malformed.write_text("#!/bin/sh\nprintf 'not-json\\n'\n")
         malformed.chmod(0o755)
         with self.assertRaises(evaluation.CodexRunBlocked) as raised:
-            evaluation.execute("gpt-6-astra", "high", "test", self.root, 10,
+            evaluation.execute("gpt-6-astra", "high", "test", self.workspace, 10,
                                str(malformed))
         summary = raised.exception.summary
         self.assertEqual(summary["reason"], "invalid-or-incomplete-event-stream")
@@ -226,7 +251,7 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
         incomplete.chmod(0o755)
         evidence = self.root / "evidence"
         with self.assertRaises(evaluation.CodexRunBlocked) as raised:
-            evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+            evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
                                evidence, 10, str(incomplete))
         summary = raised.exception.summary
         self.assertEqual(summary["reason"], "invalid-or-incomplete-event-stream")
@@ -239,12 +264,12 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
 
     def test_completed_evidence_is_never_overwritten_or_reexecuted(self):
         evidence = self.root / "evidence"
-        first = evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+        first = evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
                                    evidence, 10, str(self.fake))
         before = Path(first["receipt_path"]).read_bytes()
         with mock.patch.object(evaluation, "execute") as execute:
             with self.assertRaises(evaluation.kernel.Rejected):
-                evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+                evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
                                    evidence, 10, str(self.fake))
         execute.assert_not_called()
         self.assertEqual(Path(first["receipt_path"]).read_bytes(), before)
@@ -256,7 +281,7 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
         lock.write_text("existing uncertain attempt\n")
         with mock.patch.object(evaluation, "execute") as execute:
             with self.assertRaises(evaluation.kernel.Rejected):
-                evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+                evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
                                    evidence, 10, str(self.fake))
         execute.assert_not_called()
         self.assertEqual(lock.read_text(), "existing uncertain attempt\n")
@@ -268,7 +293,7 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
         evidence.symlink_to(real, target_is_directory=True)
         with mock.patch.object(evaluation, "execute") as execute:
             with self.assertRaises(evaluation.kernel.Rejected):
-                evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+                evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
                                    evidence, 10, str(self.fake))
         execute.assert_not_called()
         self.assertEqual(list(real.iterdir()), [])
@@ -289,7 +314,7 @@ raise SystemExit(23)
         receipts = []
         for _ in range(2):
             with self.assertRaises(evaluation.CodexRunBlocked) as raised:
-                evaluation.collect(self.campaign_path, "case-0", "candidate", self.root,
+                evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
                                    evidence, 10, str(failed))
             receipts.append(Path(raised.exception.receipt_path))
         self.assertNotEqual(receipts[0].parent, receipts[1].parent)
@@ -305,7 +330,7 @@ raise SystemExit(23)
         completed = subprocess.CompletedProcess([], 0, events, b"")
         with mock.patch.object(evaluation.subprocess, "run", return_value=completed):
             with self.assertRaises(evaluation.CodexRunBlocked) as raised:
-                evaluation.execute("gpt-6-astra", "high", "test", self.root, 10,
+                evaluation.execute("gpt-6-astra", "high", "test", self.workspace, 10,
                                    str(self.fake))
         self.assertEqual(raised.exception.summary["reason"],
                          "invalid-or-incomplete-event-stream")
@@ -348,7 +373,7 @@ raise SystemExit(23)
         grades = []
         for case in self.campaign["cases"]:
             for side in ("baseline", "candidate"):
-                result = evaluation.collect(self.campaign_path, case["id"], side, self.root,
+                result = evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
                                             evidence, 10, str(self.fake))
                 grades.append({"case_id": case["id"], "side": side, "safety_pass": True,
                                "correctness": 1.0, "evidence_coverage": 1.0, "cost": 0.0,
@@ -397,7 +422,7 @@ raise SystemExit(23)
         grades = []
         for case in self.campaign["cases"]:
             for side in ("baseline", "candidate"):
-                evaluation.collect(self.campaign_path, case["id"], side, self.root,
+                evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
                                    evidence, 10, str(self.fake))
                 grades.append({"case_id": case["id"], "side": side, "safety_pass": True,
                                "correctness": 1.0, "evidence_coverage": 1.0, "cost": 0.0,

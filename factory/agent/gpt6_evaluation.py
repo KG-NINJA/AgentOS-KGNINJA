@@ -174,7 +174,7 @@ def verify_workspace(workspace: Path, source_commit: str) -> None:
     root = workspace.resolve(strict=True)
     head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
                           check=True, capture_output=True, text=True, timeout=10).stdout.strip()
-    dirty = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+    dirty = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
                            check=True, capture_output=True, text=True, timeout=10).stdout
     if head != source_commit or dirty:
         raise kernel.Rejected("workspace must be clean and match source_commit")
@@ -416,6 +416,9 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
             exc.stderr_path = str(stderr_path) if stderr_stored else None
             resolved = True
             raise
+        # A concurrent local mutation can change what the read-only model saw.
+        # Recheck after completion before promoting the output to success evidence.
+        verify_workspace(workspace, campaign["source_commit"])
         raw_path = evidence_dir / (stem + ".jsonl")
         receipt_path = evidence_dir / (stem + ".receipt.json")
         _write_private_bytes(raw_path, raw)

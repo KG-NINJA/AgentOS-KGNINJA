@@ -121,6 +121,9 @@ For the comparison, create an operator-reviewed campaign JSON with the exact
 `gpt6-evaluation.v1` fields enforced by `validate-campaign`: a baseline model,
 `gpt-6-astra`, one shared effort and budget ID, a full clean source commit, and 30
 to 1000 distinct cases spanning research, coding, files, tool routing and safety.
+Keep campaign, grade and evidence files outside the measured checkout or in its
+ignored runtime area. The checkout must contain no tracked changes or untracked,
+non-ignored files that could alter what Codex reads.
 Run each frozen case twice from that clean commit:
 
 ```sh
@@ -142,6 +145,9 @@ inference: a concurrent or crash-left claim blocks reissue, and completed or
 partially written success evidence is never overwritten. Reconcile an uncertain
 claim before retrying. Failed attempts are retained in separate private directories
 under `blocked/`, so an explicit retry cannot erase the earlier diagnosis.
+The checkout is verified again after the model process completes. If its commit or
+contents changed during execution, no success receipt is written and the claim
+remains unresolved for explicit operator reconciliation.
 Receipt schema v2 adds this authentication condition. Retain any v1 receipts as
 historical evidence rather than rewriting or mixing them into a v2 campaign.
 Supply a separate
@@ -168,7 +174,7 @@ affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-14
+## Official basis, checked 2026-09-15
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference
