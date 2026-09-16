@@ -36,7 +36,8 @@ class EvaluationTests(unittest.TestCase):
         subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=self.workspace, check=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=self.workspace, check=True)
         (self.workspace / "fixture.txt").write_text("frozen\n")
-        subprocess.run(["git", "add", "fixture.txt"], cwd=self.workspace, check=True)
+        (self.workspace / ".gitignore").write_text("ignored.txt\n")
+        subprocess.run(["git", "add", "fixture.txt", ".gitignore"], cwd=self.workspace, check=True)
         subprocess.run(["git", "commit", "-qm", "fixture"], cwd=self.workspace, check=True)
         self.commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.workspace,
                                      check=True, capture_output=True, text=True).stdout.strip()
@@ -78,6 +79,11 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
 
     def test_untracked_workspace_input_is_rejected(self):
         (self.workspace / "untracked.txt").write_text("not frozen\n")
+        with self.assertRaises(evaluation.kernel.Rejected):
+            evaluation.verify_workspace(self.workspace, self.commit)
+
+    def test_ignored_workspace_input_is_rejected(self):
+        (self.workspace / "ignored.txt").write_text("not represented by the commit\n")
         with self.assertRaises(evaluation.kernel.Rejected):
             evaluation.verify_workspace(self.workspace, self.commit)
 
@@ -143,13 +149,13 @@ raise SystemExit(99)
         self.assertEqual(os.stat(evidence).st_mode & 0o777, 0o700)
         self.assertEqual(os.stat(evidence / "case-0.candidate.receipt.json").st_mode & 0o777, 0o600)
 
-    def test_workspace_drift_during_execution_is_not_promoted(self):
+    def test_ignored_workspace_drift_during_execution_is_not_promoted(self):
         evidence = self.root / "evidence"
         real_execute = evaluation.execute
 
         def execute_then_mutate(*args, **kwargs):
             result = real_execute(*args, **kwargs)
-            (self.workspace / "fixture.txt").write_text("changed during execution\n")
+            (self.workspace / "ignored.txt").write_text("created during execution\n")
             return result
 
         with mock.patch.object(evaluation, "execute", side_effect=execute_then_mutate):

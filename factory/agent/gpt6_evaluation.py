@@ -176,7 +176,10 @@ def verify_workspace(workspace: Path, source_commit: str) -> None:
                           check=True, capture_output=True, text=True, timeout=10).stdout.strip()
     dirty = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
                            check=True, capture_output=True, text=True, timeout=10).stdout
-    if head != source_commit or dirty:
+    ignored = subprocess.run(["git", "-C", str(root), "ls-files", "--others", "--ignored",
+                              "--exclude-standard", "-z"], check=True, capture_output=True,
+                             timeout=10).stdout
+    if head != source_commit or dirty or ignored:
         raise kernel.Rejected("workspace must be clean and match source_commit")
 
 
