@@ -118,8 +118,9 @@ thread ID and a final agent message; those failures use the same private evidenc
 path and are never promoted to a generic success receipt.
 
 For the comparison, create an operator-reviewed campaign JSON with the exact
-`gpt6-evaluation.v1` fields enforced by `validate-campaign`: a baseline model,
-`gpt-6-astra`, one shared effort and budget ID, a full clean source commit, and 30
+`gpt6-evaluation.v2` fields enforced by `validate-campaign`: a baseline model,
+`gpt-6-astra`, one shared effort, budget ID and timeout in seconds, a full clean
+source commit, and 30
 to 1000 distinct cases spanning research, coding, files, tool routing and safety.
 Keep campaign, grade and evidence files outside the measured checkout. Use a
 dedicated detached worktree or clone containing only the selected commit. The
@@ -138,7 +139,9 @@ python3 factory/agent/gpt6_evaluation.py collect --campaign campaign.json \
 By default, receipts and raw JSONL are written under the collector repository's
 ignored `runtime/` storage with directory mode 0700 and file mode 0600. That
 collector repository must not also be the measured checkout; pass a separate,
-clean checkout through `--workspace`. The collector records requested model/effort, frozen
+clean checkout through `--workspace`. A command-line timeout that differs from the
+campaign is rejected before Codex runs; omitting the flag uses the campaign value.
+The collector records requested model/effort, frozen
 input and prompt hashes, Codex version, coarse authentication surface, event hash,
 latency and token usage. It
 does not estimate cost or judge its own output. Model subprocesses receive an
@@ -152,8 +155,9 @@ under `blocked/`, so an explicit retry cannot erase the earlier diagnosis.
 The checkout is verified again after the model process completes. If its commit or
 contents changed during execution, no success receipt is written and the claim
 remains unresolved for explicit operator reconciliation.
-Receipt schema v2 adds this authentication condition. Retain any v1 receipts as
-historical evidence rather than rewriting or mixing them into a v2 campaign.
+Receipt schema v3 adds the campaign-fixed timeout to the prior authentication
+conditions. Retain v1/v2 receipts as historical evidence rather than rewriting or
+mixing them into a v3 campaign.
 Supply a separate
 `gpt6-evaluation-grades.v1` file with safety, correctness, evidence coverage,
 actual cost and evaluator references for all 60 or more runs, then compile:
@@ -166,7 +170,7 @@ python3 factory/agent/gpt6_evaluation.py compile --campaign campaign.json \
 Compilation rejects missing, extra, mismatched or stale pairs and passes only the
 assembled report to the existing migration gate. It also rejects a campaign that
 mixes Codex CLI versions, even when every individual version supports GPT-6, and
-returns the single fixed CLI version and authentication surface as explicit
+returns the single fixed CLI version, authentication surface and timeout as explicit
 comparison conditions. This prevents a client upgrade during collection from
 being mistaken for a model-only difference. Even an eligible result remains
 operator review material: it cannot activate production or verify provider
@@ -178,7 +182,7 @@ affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-16
+## Official basis, checked 2026-09-17
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference

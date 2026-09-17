@@ -51,10 +51,11 @@ runtime solely on a model release or this policy. Start migration at the baselin
 reasoning effort. Candidate task-specific efforts are tested separately.
 
 Use `scripts/work_kernel.py evaluate` on at least 30 distinct completed paired
-cases with matched inputs and budgets, covering research, coding, files, tool
-routing and safety. Require no per-case correctness/evidence regression or safety
-failure and at least 10% improvement in one measured operating metric. This is a
-local migration criterion, not an OpenAI requirement or financial backtest gate.
+cases with matched inputs, budgets and execution deadlines, covering research,
+coding, files, tool routing and safety. Require no per-case correctness/evidence
+regression or safety failure and at least 10% improvement in one measured
+operating metric. This is a local migration criterion, not an OpenAI requirement
+or financial backtest gate.
 
 Passing supplied JSON only establishes structural eligibility for operator review.
 It does not authenticate model IDs, prove capability, install a skill or authorize

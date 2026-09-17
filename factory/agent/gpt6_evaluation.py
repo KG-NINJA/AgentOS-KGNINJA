@@ -26,8 +26,8 @@ import work_kernel as kernel  # noqa: E402
 from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
                            IncompatibleCodexCli, require_gpt6_cli)  # noqa: E402
 
-SCHEMA = "gpt6-evaluation.v1"
-RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v2"
+SCHEMA = "gpt6-evaluation.v2"
+RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v3"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
 AUTH_SURFACES = {"chatgpt", "api_key", "access_token"}
@@ -120,7 +120,7 @@ def _blocked_attempt_dir(evidence_dir: Path, stem: str) -> Path:
 def load_campaign(path: Path) -> dict[str, Any]:
     data = kernel.load_json(path)
     expected = {"schema_version", "baseline_model", "candidate_model", "effort",
-                "budget_id", "source_commit", "cases"}
+                "budget_id", "timeout_seconds", "source_commit", "cases"}
     if type(data) is not dict or set(data) != expected:
         raise kernel.Rejected("invalid campaign schema")
     if data["schema_version"] != SCHEMA or data["candidate_model"] != "gpt-6-astra":
@@ -131,6 +131,8 @@ def load_campaign(path: Path) -> dict[str, Any]:
         raise kernel.Rejected("baseline and candidate must differ")
     if data["effort"] not in ("low", "medium", "high", "xhigh", "max"):
         raise kernel.Rejected("unsupported effort")
+    if type(data["timeout_seconds"]) is not int or not 1 <= data["timeout_seconds"] <= 3600:
+        raise kernel.Rejected("timeout_seconds must be 1..3600")
     if type(data["source_commit"]) is not str or not COMMIT.fullmatch(data["source_commit"]):
         raise kernel.Rejected("source_commit must be a full Git object id")
     cases = data["cases"]
@@ -365,11 +367,16 @@ def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_secon
 
 
 def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
-            evidence_dir: Path, timeout_seconds: int, executable: str = "codex") -> dict[str, Any]:
+            evidence_dir: Path, timeout_seconds: int | None = None,
+            executable: str = "codex") -> dict[str, Any]:
     campaign = load_campaign(campaign_path)
     case = _case(campaign, case_id)
     if side not in ("baseline", "candidate"):
         raise kernel.Rejected("side must be baseline or candidate")
+    if timeout_seconds is None:
+        timeout_seconds = campaign["timeout_seconds"]
+    elif timeout_seconds != campaign["timeout_seconds"]:
+        raise kernel.Rejected("timeout does not match campaign")
     verify_workspace(workspace, campaign["source_commit"])
     model = campaign[side + "_model"]
     version = _codex_version(executable)
@@ -428,7 +435,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
         receipt = {"schema_version": RECEIPT_SCHEMA, "campaign_sha256": kernel.digest(campaign),
                    "case_id": case_id, "side": side, "category": case["category"],
                    "requested_model": model, "requested_effort": campaign["effort"],
-                   "budget_id": campaign["budget_id"], "input_sha256": case_input_sha(campaign, case),
+                   "budget_id": campaign["budget_id"], "timeout_seconds": timeout_seconds,
+                   "input_sha256": case_input_sha(campaign, case),
                    "prompt_sha256": _sha_bytes(case["prompt"].encode()),
                    "source_commit": campaign["source_commit"], "codex_version": version,
                    "auth_surface": auth_surface,
@@ -501,7 +509,8 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
             receipt = kernel.load_json(receipt_path)
             expected = {"schema_version", "campaign_sha256", "case_id", "side", "category",
                         "requested_model", "requested_effort", "budget_id", "input_sha256",
-                        "prompt_sha256", "source_commit", "codex_version", "auth_surface",
+                        "timeout_seconds", "prompt_sha256", "source_commit", "codex_version",
+                        "auth_surface",
                         "observed_at",
                         "provider_model_identity_verified", "completed", "latency_ms", "input_tokens",
                         "cached_input_tokens", "output_tokens", "reasoning_output_tokens",
@@ -515,6 +524,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
                     or receipt["requested_model"] != campaign[side + "_model"]
                     or receipt["requested_effort"] != campaign["effort"]
                     or receipt["budget_id"] != campaign["budget_id"]
+                    or receipt["timeout_seconds"] != campaign["timeout_seconds"]
                     or receipt["input_sha256"] != pair["input_sha256"]
                     or receipt["prompt_sha256"] != _sha_bytes(case["prompt"].encode())
                     or receipt["source_commit"] != campaign["source_commit"]
@@ -551,7 +561,8 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
               "candidate_model": campaign["candidate_model"], "pairs": pairs}
     return {"report": report, "gate": kernel.migration_gate(report),
             "comparison_conditions": {"codex_version": campaign_codex_version,
-                                      "auth_surface": campaign_auth_surface},
+                                      "auth_surface": campaign_auth_surface,
+                                      "timeout_seconds": campaign["timeout_seconds"]},
             "provider_authenticity_note": "CLI receipts record requested models and coarse authentication surfaces; independent provider identity and entitlement remain unverified."}
 
 
@@ -571,7 +582,8 @@ def main() -> int:
     collect_cmd.add_argument("--side", choices=("baseline", "candidate"), required=True)
     collect_cmd.add_argument("--workspace", type=Path, required=True)
     collect_cmd.add_argument("--evidence-dir", type=Path, default=ROOT / "runtime/gpt6-evaluation")
-    collect_cmd.add_argument("--timeout-seconds", type=int, default=900)
+    collect_cmd.add_argument("--timeout-seconds", type=int,
+                             help="must match the campaign value; omitted uses the campaign")
     compile_cmd = sub.add_parser("compile")
     compile_cmd.add_argument("--campaign", type=Path, required=True)
     compile_cmd.add_argument("--evidence-dir", type=Path, required=True)
@@ -582,6 +594,7 @@ def main() -> int:
             campaign = load_campaign(args.campaign)
             output = {"valid": True, "campaign_sha256": kernel.digest(campaign),
                       "case_count": len(campaign["cases"]),
+                      "timeout_seconds": campaign["timeout_seconds"],
                       "categories": sorted({case["category"] for case in campaign["cases"]})}
         elif args.command == "probe":
             receipt = probe(args.effort, args.workspace, args.timeout_seconds)

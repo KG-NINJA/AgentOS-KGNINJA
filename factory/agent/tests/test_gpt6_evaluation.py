@@ -20,6 +20,7 @@ import gpt6_evaluation as evaluation
 def campaign(commit: str) -> dict:
     return {"schema_version": evaluation.SCHEMA, "baseline_model": "gpt-5.3-codex",
             "candidate_model": "gpt-6-astra", "effort": "high", "budget_id": "frozen-budget",
+            "timeout_seconds": 10,
             "source_commit": commit,
             "cases": [{"id": f"case-{i}",
                        "category": sorted(evaluation.CATEGORIES)[i % len(evaluation.CATEGORIES)],
@@ -71,6 +72,12 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
         path.write_text(json.dumps(bad))
         with self.assertRaises(evaluation.kernel.Rejected):
             evaluation.load_campaign(path)
+        for timeout in (True, 0, 3601):
+            with self.subTest(timeout=timeout):
+                path.write_text(json.dumps(dict(self.campaign, timeout_seconds=timeout)))
+                with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                            "timeout_seconds must be"):
+                    evaluation.load_campaign(path)
 
     def test_dirty_or_wrong_workspace_is_rejected(self):
         (self.workspace / "fixture.txt").write_text("changed\n")
@@ -149,6 +156,16 @@ raise SystemExit(99)
         self.assertEqual(os.stat(evidence).st_mode & 0o777, 0o700)
         self.assertEqual(os.stat(evidence / "case-0.candidate.receipt.json").st_mode & 0o777, 0o600)
 
+    def test_collect_rejects_timeout_mismatch_before_model_call(self):
+        with mock.patch.object(evaluation, "_codex_version") as version, \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                        "timeout does not match campaign"):
+                evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
+                                   self.root / "evidence", 9, str(self.fake))
+        version.assert_not_called()
+        execute.assert_not_called()
+
     def test_ignored_workspace_drift_during_execution_is_not_promoted(self):
         evidence = self.root / "evidence"
         real_execute = evaluation.execute
@@ -180,6 +197,8 @@ print(json.dumps({'type':'turn.started'}), flush=True)
 time.sleep(5)
 """)
         slow.chmod(0o755)
+        self.campaign["timeout_seconds"] = 1
+        self.campaign_path.write_text(json.dumps(self.campaign))
         evidence = self.root / "evidence"
         with self.assertRaises(evaluation.CodexRunBlocked) as raised:
             evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
@@ -394,7 +413,8 @@ raise SystemExit(23)
         self.assertFalse(output["gate"]["provider_authenticity_verified"])
         self.assertIn("no_10_percent_operational_improvement", output["gate"]["reasons"])
         self.assertEqual(output["comparison_conditions"],
-                         {"codex_version": "codex-cli 9.9.9", "auth_surface": "chatgpt"})
+                         {"codex_version": "codex-cli 9.9.9", "auth_surface": "chatgpt",
+                          "timeout_seconds": 10})
         receipt_path = evidence / "case-0.candidate.receipt.json"
         receipt = json.loads(receipt_path.read_text())
         receipt["auth_surface"] = "api_key"
@@ -415,6 +435,13 @@ raise SystemExit(23)
                                     "Codex CLI version changed"):
             evaluation.compile_report(self.campaign_path, evidence, grade_path)
         receipt["codex_version"] = "codex-cli 9.9.9"
+        receipt_path.write_text(json.dumps(receipt))
+        receipt["timeout_seconds"] = 9
+        receipt_path.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "receipt does not match campaign"):
+            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+        receipt["timeout_seconds"] = 10
         receipt_path.write_text(json.dumps(receipt))
         grades.pop()
         grade_path.write_text(json.dumps({"schema_version": "gpt6-evaluation-grades.v1",

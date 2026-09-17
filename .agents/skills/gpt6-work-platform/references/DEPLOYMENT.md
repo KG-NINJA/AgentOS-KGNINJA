@@ -81,9 +81,9 @@ model performance improvement is established by these software tests.
 runtime-policy.json is candidate intent, not active deployment configuration.
 Keep the verified runtime until account/model access and actual response IDs are
 checked independently, then freeze at least 30 distinct completed paired tasks
-across research, coding, files, tool routing and safety. Match data/tools/budgets
-and effective effort; record source receipts, prompt/input hashes, safety,
-correctness, evidence coverage, latency, input tokens and cost.
+across research, coding, files, tool routing and safety. Match data/tools/budgets,
+execution timeouts and effective effort; record source receipts, prompt/input
+hashes, safety, correctness, evidence coverage, latency, input tokens and cost.
 
 The offline gate requires no per-case quality regression or safety failure and
 at least 10% improvement in a measured operating metric. These are project
