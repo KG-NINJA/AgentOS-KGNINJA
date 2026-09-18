@@ -84,6 +84,9 @@ checked independently, then freeze at least 30 distinct completed paired tasks
 across research, coding, files, tool routing and safety. Match data/tools/budgets,
 execution timeouts and effective effort; record source receipts, prompt/input
 hashes, safety, correctness, evidence coverage, latency, input tokens and cost.
+Independent grades must name the exact receipt and raw event-stream hashes they
+reviewed. Compilation re-derives token counts and completion hashes from that raw
+JSONL and rejects evidence changed after grading.
 
 The offline gate requires no per-case quality regression or safety failure and
 at least 10% improvement in a measured operating metric. These are project

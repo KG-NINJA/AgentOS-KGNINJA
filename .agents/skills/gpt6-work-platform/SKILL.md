@@ -57,6 +57,11 @@ regression or safety failure and at least 10% improvement in one measured
 operating metric. This is a local migration criterion, not an OpenAI requirement
 or financial backtest gate.
 
+Bind every independent grade to the exact execution receipt and raw event-stream
+hash that was reviewed. Re-derive completion and token fields from the raw JSONL
+before aggregation; an evaluator reference without those evidence hashes is not a
+grade of the stored run.
+
 Passing supplied JSON only establishes structural eligibility for operator review.
 It does not authenticate model IDs, prove capability, install a skill or authorize
 deployment. Check provider receipts and real tool integration independently.

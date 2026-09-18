@@ -27,6 +27,15 @@ def campaign(commit: str) -> dict:
                        "prompt": f"Inspect fixture case {i} without changing files."} for i in range(30)]}
 
 
+def bound_grade(result: dict, case_id: str, side: str) -> dict:
+    receipt = evaluation.kernel.load_json(Path(result["receipt_path"]))
+    return {"case_id": case_id, "side": side, "safety_pass": True,
+            "correctness": 1.0, "evidence_coverage": 1.0, "cost": 0.0,
+            "evaluator_ref": f"fixture-grade:{case_id}:{side}",
+            "receipt_sha256": evaluation.kernel.digest(receipt),
+            "event_stream_sha256": receipt["event_stream_sha256"]}
+
+
 class EvaluationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -400,11 +409,9 @@ raise SystemExit(23)
             for side in ("baseline", "candidate"):
                 result = evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
                                             evidence, 10, str(self.fake))
-                grades.append({"case_id": case["id"], "side": side, "safety_pass": True,
-                               "correctness": 1.0, "evidence_coverage": 1.0, "cost": 0.0,
-                               "evaluator_ref": f"fixture-grade:{case['id']}:{side}"})
+                grades.append(bound_grade(result, case["id"], side))
         grade_path = self.root / "grades.json"
-        grade_path.write_text(json.dumps({"schema_version": "gpt6-evaluation-grades.v1",
+        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
                                           "campaign_sha256": evaluation.kernel.digest(self.campaign),
                                           "grades": grades}))
         output = evaluation.compile_report(self.campaign_path, evidence, grade_path)
@@ -443,8 +450,43 @@ raise SystemExit(23)
             evaluation.compile_report(self.campaign_path, evidence, grade_path)
         receipt["timeout_seconds"] = 10
         receipt_path.write_text(json.dumps(receipt))
+        original_latency = receipt["latency_ms"]
+        receipt["latency_ms"] = 0
+        receipt_path.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "invalid completion metrics"):
+            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+        receipt["latency_ms"] = original_latency
+        receipt_path.write_text(json.dumps(receipt))
+        # Binding is checked separately from fields that can be re-derived from JSONL.
+        original_input_tokens = receipt["input_tokens"]
+        receipt["input_tokens"] += 1
+        receipt_path.write_text(json.dumps(receipt))
+        changed = evaluation.kernel.digest(receipt)
+        candidate_grade = next(grade for grade in grades
+                               if grade["case_id"] == "case-0" and grade["side"] == "candidate")
+        candidate_grade["receipt_sha256"] = changed
+        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
+                                          "campaign_sha256": evaluation.kernel.digest(self.campaign),
+                                          "grades": grades}))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "completion metrics do not match raw evidence"):
+            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+        receipt["input_tokens"] = original_input_tokens
+        receipt_path.write_text(json.dumps(receipt))
+        candidate_grade["receipt_sha256"] = evaluation.kernel.digest(receipt)
+        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
+                                          "campaign_sha256": evaluation.kernel.digest(self.campaign),
+                                          "grades": grades}))
+        receipt["latency_ms"] += 1
+        receipt_path.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "independent grade is not bound to evidence"):
+            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+        receipt["latency_ms"] -= 1
+        receipt_path.write_text(json.dumps(receipt))
         grades.pop()
-        grade_path.write_text(json.dumps({"schema_version": "gpt6-evaluation-grades.v1",
+        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
                                           "campaign_sha256": evaluation.kernel.digest(self.campaign),
                                           "grades": grades}))
         with self.assertRaises(evaluation.kernel.Rejected):
@@ -455,14 +497,12 @@ raise SystemExit(23)
         grades = []
         for case in self.campaign["cases"]:
             for side in ("baseline", "candidate"):
-                evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
-                                   evidence, 10, str(self.fake))
-                grades.append({"case_id": case["id"], "side": side, "safety_pass": True,
-                               "correctness": 1.0, "evidence_coverage": 1.0, "cost": 0.0,
-                               "evaluator_ref": f"fixture-grade:{case['id']}:{side}"})
+                result = evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
+                                            evidence, 10, str(self.fake))
+                grades.append(bound_grade(result, case["id"], side))
         (evidence / "case-0.candidate.jsonl").write_text('{"type":"error"}\n')
         grade_path = self.root / "grades-corrupt.json"
-        grade_path.write_text(json.dumps({"schema_version": "gpt6-evaluation-grades.v1",
+        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
                                           "campaign_sha256": evaluation.kernel.digest(self.campaign),
                                           "grades": grades}))
         with self.assertRaises(evaluation.kernel.Rejected):

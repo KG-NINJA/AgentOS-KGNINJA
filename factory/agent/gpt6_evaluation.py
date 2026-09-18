@@ -28,6 +28,7 @@ from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
 
 SCHEMA = "gpt6-evaluation.v2"
 RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v3"
+GRADE_SCHEMA = "gpt6-evaluation-grades.v2"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
 AUTH_SURFACES = {"chatgpt", "api_key", "access_token"}
@@ -243,6 +244,37 @@ def _parse_events(raw: bytes) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return events, usage
 
 
+def _completion_evidence(raw: bytes) -> tuple[dict[str, Any], str]:
+    """Derive all completion fields that can be verified from raw Codex JSONL."""
+    events, usage = _parse_events(raw)
+    thread = next(event for event in events if event["type"] == "thread.started")
+    thread_id = thread.get("thread_id")
+    if type(thread_id) is not str or not thread_id:
+        raise kernel.Rejected("Codex completion is missing thread id")
+    messages = [event.get("item", {}).get("text") for event in events
+                if event.get("type") == "item.completed"
+                and type(event.get("item")) is dict
+                and event["item"].get("type") == "agent_message"]
+    if not messages or type(messages[-1]) is not str:
+        raise kernel.Rejected("Codex completion is missing final agent message")
+    tokens: dict[str, int | None] = {}
+    for name in ("input_tokens", "cached_input_tokens", "output_tokens",
+                 "reasoning_output_tokens"):
+        value = usage.get(name)
+        if name == "input_tokens":
+            if type(value) is not int or value < 0:
+                raise kernel.Rejected("Codex completion is missing usage")
+        elif value is not None and (type(value) is not int or value < 0):
+            raise kernel.Rejected("Codex completion has invalid usage")
+        tokens[name] = value
+    return {
+        **tokens,
+        "thread_id_sha256": _sha_bytes(thread_id.encode()),
+        "final_message_sha256": _sha_bytes(messages[-1].encode()),
+        "event_stream_sha256": _sha_bytes(raw),
+    }, messages[-1]
+
+
 def _partial_event_summary(raw: bytes) -> dict[str, Any]:
     """Summarize complete JSONL records without exposing event payloads."""
     event_types: list[str] = []
@@ -334,17 +366,7 @@ def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_secon
     raw_stdout = _output_bytes(result.stdout)
     raw_stderr = _output_bytes(result.stderr)
     try:
-        events, usage = _parse_events(raw_stdout)
-        thread = next(event for event in events if event["type"] == "thread.started")
-        thread_id = thread.get("thread_id")
-        if type(thread_id) is not str or not thread_id:
-            raise kernel.Rejected("Codex completion is missing thread id")
-        messages = [event.get("item", {}).get("text") for event in events
-                    if event.get("type") == "item.completed"
-                    and type(event.get("item")) is dict
-                    and event["item"].get("type") == "agent_message"]
-        if not messages or type(messages[-1]) is not str:
-            raise kernel.Rejected("Codex completion is missing final agent message")
+        completion, _ = _completion_evidence(raw_stdout)
     except (kernel.Rejected, json.JSONDecodeError, UnicodeError) as exc:
         reason = "process-failure" if result.returncode else "invalid-or-incomplete-event-stream"
         summary = _blocked_summary(reason, model, effort, timeout_seconds, latency_ms,
@@ -354,14 +376,7 @@ def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_secon
         summary = _blocked_summary("process-failure", model, effort, timeout_seconds,
                                    latency_ms, raw_stdout, raw_stderr, result.returncode)
         raise CodexRunBlocked(summary, raw_stdout, raw_stderr)
-    summary = {"completed": True, "latency_ms": latency_ms,
-               "input_tokens": usage["input_tokens"],
-               "cached_input_tokens": usage.get("cached_input_tokens"),
-               "output_tokens": usage.get("output_tokens"),
-               "reasoning_output_tokens": usage.get("reasoning_output_tokens"),
-               "thread_id_sha256": _sha_bytes(thread_id.encode()),
-               "final_message_sha256": _sha_bytes(messages[-1].encode()),
-               "event_stream_sha256": _sha_bytes(raw_stdout)}
+    summary = {"completed": True, "latency_ms": latency_ms, **completion}
     kernel.canonical(summary)
     return summary, raw_stdout
 
@@ -477,12 +492,14 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
     campaign = load_campaign(campaign_path)
     grades = kernel.load_json(grades_path)
     expected_grades = {"schema_version", "campaign_sha256", "grades"}
-    if type(grades) is not dict or set(grades) != expected_grades or grades["schema_version"] != "gpt6-evaluation-grades.v1":
+    if type(grades) is not dict or set(grades) != expected_grades or grades["schema_version"] != GRADE_SCHEMA:
         raise kernel.Rejected("invalid grades schema")
     if grades["campaign_sha256"] != kernel.digest(campaign) or type(grades["grades"]) is not list:
         raise kernel.Rejected("grades do not match campaign")
     grade_map: dict[tuple[str, str], dict[str, Any]] = {}
-    required_grade = {"case_id", "side", "safety_pass", "correctness", "evidence_coverage", "cost", "evaluator_ref"}
+    required_grade = {"case_id", "side", "safety_pass", "correctness",
+                      "evidence_coverage", "cost", "evaluator_ref",
+                      "receipt_sha256", "event_stream_sha256"}
     for grade in grades["grades"]:
         if type(grade) is not dict or set(grade) != required_grade:
             raise kernel.Rejected("invalid grade")
@@ -496,6 +513,9 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
         kernel.number(grade["cost"])
         if type(grade["evaluator_ref"]) is not str or not grade["evaluator_ref"]:
             raise kernel.Rejected("missing evaluator reference")
+        for field in ("receipt_sha256", "event_stream_sha256"):
+            if type(grade[field]) is not str or not kernel.SHA.fullmatch(grade[field]):
+                raise kernel.Rejected("grade is missing an evidence hash")
         grade_map[key] = grade
     pairs = []
     campaign_auth_surface: str | None = None
@@ -540,12 +560,24 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
             elif receipt_codex_version != campaign_codex_version:
                 raise kernel.Rejected("campaign Codex CLI version changed")
             raw = raw_path.read_bytes()
-            _parse_events(raw)
+            completion, _ = _completion_evidence(raw)
             if _sha_bytes(raw) != receipt["event_stream_sha256"]:
                 raise kernel.Rejected("raw event evidence does not match receipt")
+            try:
+                latency_ms = kernel.number(receipt["latency_ms"], positive=True)
+            except kernel.Rejected as exc:
+                raise kernel.Rejected("receipt has invalid completion metrics") from exc
+            if receipt["completed"] is not True or latency_ms > 3_600_000:
+                raise kernel.Rejected("receipt has invalid completion metrics")
+            for field, value in completion.items():
+                if receipt[field] != value:
+                    raise kernel.Rejected("receipt completion metrics do not match raw evidence")
             grade = grade_map.get((case["id"], side))
             if grade is None:
                 raise kernel.Rejected("missing independent grade")
+            if (grade["receipt_sha256"] != kernel.digest(receipt)
+                    or grade["event_stream_sha256"] != _sha_bytes(raw)):
+                raise kernel.Rejected("independent grade is not bound to evidence")
             pair[side] = {"model": receipt["requested_model"], "effort": receipt["requested_effort"],
                           "completed": receipt["completed"], "safety_pass": grade["safety_pass"],
                           "correctness": grade["correctness"], "evidence_coverage": grade["evidence_coverage"],

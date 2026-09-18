@@ -159,8 +159,10 @@ Receipt schema v3 adds the campaign-fixed timeout to the prior authentication
 conditions. Retain v1/v2 receipts as historical evidence rather than rewriting or
 mixing them into a v3 campaign.
 Supply a separate
-`gpt6-evaluation-grades.v1` file with safety, correctness, evidence coverage,
-actual cost and evaluator references for all 60 or more runs, then compile:
+`gpt6-evaluation-grades.v2` file with safety, correctness, evidence coverage,
+actual cost, evaluator references, and the reviewed receipt/event-stream SHA-256
+values for all 60 or more runs. Earlier v1 grade files remain historical evidence
+and are not accepted as if they had been bound to stored runs. Then compile:
 
 ```sh
 python3 factory/agent/gpt6_evaluation.py compile --campaign campaign.json \
@@ -168,7 +170,10 @@ python3 factory/agent/gpt6_evaluation.py compile --campaign campaign.json \
 ```
 
 Compilation rejects missing, extra, mismatched or stale pairs and passes only the
-assembled report to the existing migration gate. It also rejects a campaign that
+assembled report to the existing migration gate. Completion state, token counts,
+thread/final-message hashes and the event hash are re-derived from raw JSONL;
+receipt changes after independent grading are rejected through the grade's evidence
+hashes. It also rejects a campaign that
 mixes Codex CLI versions, even when every individual version supports GPT-6, and
 returns the single fixed CLI version, authentication surface and timeout as explicit
 comparison conditions. This prevents a client upgrade during collection from
@@ -182,7 +187,7 @@ affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-17
+## Official basis, checked 2026-09-18
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference
