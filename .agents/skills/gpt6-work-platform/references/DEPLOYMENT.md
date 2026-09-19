@@ -82,8 +82,9 @@ runtime-policy.json is candidate intent, not active deployment configuration.
 Keep the verified runtime until account/model access and actual response IDs are
 checked independently, then freeze at least 30 distinct completed paired tasks
 across research, coding, files, tool routing and safety. Match data/tools/budgets,
-execution timeouts and effective effort; record source receipts, prompt/input
-hashes, safety, correctness, evidence coverage, latency, input tokens and cost.
+execution timeouts, effective effort and a campaign-fixed maximum observation gap
+for every baseline/candidate pair; record source receipts, prompt/input hashes,
+safety, correctness, evidence coverage, latency, input tokens and cost.
 Independent grades must name the exact receipt and raw event-stream hashes they
 reviewed. Compilation re-derives token counts and completion hashes from that raw
 JSONL and rejects evidence changed after grading.

@@ -8,6 +8,7 @@ Work-platform migration gate is evaluated.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -26,8 +27,8 @@ import work_kernel as kernel  # noqa: E402
 from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
                            IncompatibleCodexCli, require_gpt6_cli)  # noqa: E402
 
-SCHEMA = "gpt6-evaluation.v2"
-RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v3"
+SCHEMA = "gpt6-evaluation.v3"
+RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v4"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v2"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
@@ -121,7 +122,8 @@ def _blocked_attempt_dir(evidence_dir: Path, stem: str) -> Path:
 def load_campaign(path: Path) -> dict[str, Any]:
     data = kernel.load_json(path)
     expected = {"schema_version", "baseline_model", "candidate_model", "effort",
-                "budget_id", "timeout_seconds", "source_commit", "cases"}
+                "budget_id", "timeout_seconds", "max_pair_gap_seconds",
+                "source_commit", "cases"}
     if type(data) is not dict or set(data) != expected:
         raise kernel.Rejected("invalid campaign schema")
     if data["schema_version"] != SCHEMA or data["candidate_model"] != "gpt-6-astra":
@@ -134,6 +136,9 @@ def load_campaign(path: Path) -> dict[str, Any]:
         raise kernel.Rejected("unsupported effort")
     if type(data["timeout_seconds"]) is not int or not 1 <= data["timeout_seconds"] <= 3600:
         raise kernel.Rejected("timeout_seconds must be 1..3600")
+    if (type(data["max_pair_gap_seconds"]) is not int
+            or not 1 <= data["max_pair_gap_seconds"] <= 21_600):
+        raise kernel.Rejected("max_pair_gap_seconds must be 1..21600")
     if type(data["source_commit"]) is not str or not COMMIT.fullmatch(data["source_commit"]):
         raise kernel.Rejected("source_commit must be a full Git object id")
     cases = data["cases"]
@@ -171,6 +176,19 @@ def _case(campaign: dict[str, Any], case_id: str) -> dict[str, Any]:
     if len(matches) != 1:
         raise kernel.Rejected("unknown case")
     return matches[0]
+
+
+def _observed_epoch(value: Any) -> float:
+    """Parse the exact UTC timestamp emitted by this collector."""
+    if type(value) is not str:
+        raise kernel.Rejected("receipt has invalid observation time")
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise kernel.Rejected("receipt has invalid observation time") from exc
+    if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != value:
+        raise kernel.Rejected("receipt has invalid observation time")
+    return parsed.timestamp()
 
 
 def verify_workspace(workspace: Path, source_commit: str) -> None:
@@ -450,7 +468,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
         receipt = {"schema_version": RECEIPT_SCHEMA, "campaign_sha256": kernel.digest(campaign),
                    "case_id": case_id, "side": side, "category": case["category"],
                    "requested_model": model, "requested_effort": campaign["effort"],
-                   "budget_id": campaign["budget_id"], "timeout_seconds": timeout_seconds,
+                    "budget_id": campaign["budget_id"], "timeout_seconds": timeout_seconds,
+                    "max_pair_gap_seconds": campaign["max_pair_gap_seconds"],
                    "input_sha256": case_input_sha(campaign, case),
                    "prompt_sha256": _sha_bytes(case["prompt"].encode()),
                    "source_commit": campaign["source_commit"], "codex_version": version,
@@ -520,16 +539,19 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
     pairs = []
     campaign_auth_surface: str | None = None
     campaign_codex_version: str | None = None
+    max_observed_pair_gap_seconds = 0.0
     for case in campaign["cases"]:
         pair = {"id": case["id"], "input_sha256": case_input_sha(campaign, case),
                 "category": case["category"], "budget_id": campaign["budget_id"]}
+        observed_at: dict[str, float] = {}
         for side in ("baseline", "candidate"):
             receipt_path = evidence_dir / f"{case['id']}.{side}.receipt.json"
             raw_path = evidence_dir / f"{case['id']}.{side}.jsonl"
             receipt = kernel.load_json(receipt_path)
             expected = {"schema_version", "campaign_sha256", "case_id", "side", "category",
                         "requested_model", "requested_effort", "budget_id", "input_sha256",
-                        "timeout_seconds", "prompt_sha256", "source_commit", "codex_version",
+                        "timeout_seconds", "max_pair_gap_seconds", "prompt_sha256",
+                        "source_commit", "codex_version",
                         "auth_surface",
                         "observed_at",
                         "provider_model_identity_verified", "completed", "latency_ms", "input_tokens",
@@ -543,14 +565,16 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
                     or receipt["category"] != case["category"]
                     or receipt["requested_model"] != campaign[side + "_model"]
                     or receipt["requested_effort"] != campaign["effort"]
-                    or receipt["budget_id"] != campaign["budget_id"]
-                    or receipt["timeout_seconds"] != campaign["timeout_seconds"]
+                     or receipt["budget_id"] != campaign["budget_id"]
+                     or receipt["timeout_seconds"] != campaign["timeout_seconds"]
+                     or receipt["max_pair_gap_seconds"] != campaign["max_pair_gap_seconds"]
                     or receipt["input_sha256"] != pair["input_sha256"]
                     or receipt["prompt_sha256"] != _sha_bytes(case["prompt"].encode())
                     or receipt["source_commit"] != campaign["source_commit"]
                     or receipt["auth_surface"] not in AUTH_SURFACES
                     or receipt["provider_model_identity_verified"] is not False):
                 raise kernel.Rejected("receipt does not match campaign")
+            observed_at[side] = _observed_epoch(receipt["observed_at"])
             if campaign_auth_surface is None:
                 campaign_auth_surface = receipt["auth_surface"]
             elif receipt["auth_surface"] != campaign_auth_surface:
@@ -584,8 +608,12 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
                           "latency_ms": receipt["latency_ms"], "cost": grade["cost"],
                           "input_tokens": receipt["input_tokens"],
                           "source_ref": f"{receipt_path}#sha256={kernel.digest(receipt)};{grade['evaluator_ref']}",
-                          "prompt_sha256": receipt["prompt_sha256"],
-                          "input_sha256": receipt["input_sha256"], "budget_id": receipt["budget_id"]}
+                           "prompt_sha256": receipt["prompt_sha256"],
+                           "input_sha256": receipt["input_sha256"], "budget_id": receipt["budget_id"]}
+        pair_gap = abs(observed_at["candidate"] - observed_at["baseline"])
+        if pair_gap > campaign["max_pair_gap_seconds"]:
+            raise kernel.Rejected("paired observations exceeded max_pair_gap_seconds")
+        max_observed_pair_gap_seconds = max(max_observed_pair_gap_seconds, pair_gap)
         pairs.append(pair)
     if len(grade_map) != len(pairs) * 2:
         raise kernel.Rejected("grades contain cases outside campaign")
@@ -593,8 +621,10 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
               "candidate_model": campaign["candidate_model"], "pairs": pairs}
     return {"report": report, "gate": kernel.migration_gate(report),
             "comparison_conditions": {"codex_version": campaign_codex_version,
-                                      "auth_surface": campaign_auth_surface,
-                                      "timeout_seconds": campaign["timeout_seconds"]},
+                                       "auth_surface": campaign_auth_surface,
+                                       "timeout_seconds": campaign["timeout_seconds"],
+                                       "max_pair_gap_seconds": campaign["max_pair_gap_seconds"],
+                                       "max_observed_pair_gap_seconds": max_observed_pair_gap_seconds},
             "provider_authenticity_note": "CLI receipts record requested models and coarse authentication surfaces; independent provider identity and entitlement remain unverified."}
 
 

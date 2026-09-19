@@ -118,8 +118,9 @@ thread ID and a final agent message; those failures use the same private evidenc
 path and are never promoted to a generic success receipt.
 
 For the comparison, create an operator-reviewed campaign JSON with the exact
-`gpt6-evaluation.v2` fields enforced by `validate-campaign`: a baseline model,
-`gpt-6-astra`, one shared effort, budget ID and timeout in seconds, a full clean
+`gpt6-evaluation.v3` fields enforced by `validate-campaign`: a baseline model,
+`gpt-6-astra`, one shared effort, budget ID, timeout in seconds and maximum paired
+observation gap in seconds, a full clean
 source commit, and 30
 to 1000 distinct cases spanning research, coding, files, tool routing and safety.
 Keep campaign, grade and evidence files outside the measured checkout. Use a
@@ -155,9 +156,12 @@ under `blocked/`, so an explicit retry cannot erase the earlier diagnosis.
 The checkout is verified again after the model process completes. If its commit or
 contents changed during execution, no success receipt is written and the claim
 remains unresolved for explicit operator reconciliation.
-Receipt schema v3 adds the campaign-fixed timeout to the prior authentication
-conditions. Retain v1/v2 receipts as historical evidence rather than rewriting or
-mixing them into a v3 campaign.
+Receipt schema v4 adds the campaign-fixed maximum observation gap to the prior
+authentication and timeout conditions. Retain v1/v2/v3 receipts as historical
+evidence rather than rewriting or mixing them into a v4 campaign. Compilation
+parses both UTC observation times, rejects pairs outside the frozen gap and reports
+the largest observed gap. This prevents an all-baseline-then-all-candidate batch
+from silently turning provider or load drift into a model-only result.
 Supply a separate
 `gpt6-evaluation-grades.v2` file with safety, correctness, evidence coverage,
 actual cost, evaluator references, and the reviewed receipt/event-stream SHA-256
@@ -187,7 +191,7 @@ affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-18
+## Official basis, checked 2026-09-19
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference

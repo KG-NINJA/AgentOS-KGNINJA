@@ -51,7 +51,8 @@ runtime solely on a model release or this policy. Start migration at the baselin
 reasoning effort. Candidate task-specific efforts are tested separately.
 
 Use `scripts/work_kernel.py evaluate` on at least 30 distinct completed paired
-cases with matched inputs, budgets and execution deadlines, covering research,
+cases with matched inputs, budgets, execution deadlines and a campaign-fixed
+maximum observation gap between each baseline/candidate pair, covering research,
 coding, files, tool routing and safety. Require no per-case correctness/evidence
 regression or safety failure and at least 10% improvement in one measured
 operating metric. This is a local migration criterion, not an OpenAI requirement
@@ -61,6 +62,10 @@ Bind every independent grade to the exact execution receipt and raw event-stream
 hash that was reviewed. Re-derive completion and token fields from the raw JSONL
 before aggregation; an evaluator reference without those evidence hashes is not a
 grade of the stored run.
+
+Do not batch all baseline observations long before all candidate observations.
+Reject pairs outside the fixed observation gap so provider or load drift cannot be
+silently presented as a model-only difference.
 
 Passing supplied JSON only establishes structural eligibility for operator review.
 It does not authenticate model IDs, prove capability, install a skill or authorize

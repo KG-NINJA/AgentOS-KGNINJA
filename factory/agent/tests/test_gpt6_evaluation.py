@@ -21,6 +21,7 @@ def campaign(commit: str) -> dict:
     return {"schema_version": evaluation.SCHEMA, "baseline_model": "gpt-5.3-codex",
             "candidate_model": "gpt-6-astra", "effort": "high", "budget_id": "frozen-budget",
             "timeout_seconds": 10,
+            "max_pair_gap_seconds": 3600,
             "source_commit": commit,
             "cases": [{"id": f"case-{i}",
                        "category": sorted(evaluation.CATEGORIES)[i % len(evaluation.CATEGORIES)],
@@ -86,6 +87,13 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
                 path.write_text(json.dumps(dict(self.campaign, timeout_seconds=timeout)))
                 with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                             "timeout_seconds must be"):
+                    evaluation.load_campaign(path)
+        for pair_gap in (True, 0, 21_601):
+            with self.subTest(pair_gap=pair_gap):
+                path.write_text(json.dumps(dict(self.campaign,
+                                                max_pair_gap_seconds=pair_gap)))
+                with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                            "max_pair_gap_seconds must be"):
                     evaluation.load_campaign(path)
 
     def test_dirty_or_wrong_workspace_is_rejected(self):
@@ -414,14 +422,18 @@ raise SystemExit(23)
         grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
                                           "campaign_sha256": evaluation.kernel.digest(self.campaign),
                                           "grades": grades}))
+        candidate_grade = next(grade for grade in grades
+                               if grade["case_id"] == "case-0" and grade["side"] == "candidate")
         output = evaluation.compile_report(self.campaign_path, evidence, grade_path)
         self.assertEqual(output["gate"]["paired_cases"], 30)
         self.assertFalse(output["gate"]["activated"])
         self.assertFalse(output["gate"]["provider_authenticity_verified"])
         self.assertIn("no_10_percent_operational_improvement", output["gate"]["reasons"])
-        self.assertEqual(output["comparison_conditions"],
-                         {"codex_version": "codex-cli 9.9.9", "auth_surface": "chatgpt",
-                          "timeout_seconds": 10})
+        self.assertEqual(output["comparison_conditions"]["codex_version"], "codex-cli 9.9.9")
+        self.assertEqual(output["comparison_conditions"]["auth_surface"], "chatgpt")
+        self.assertEqual(output["comparison_conditions"]["timeout_seconds"], 10)
+        self.assertEqual(output["comparison_conditions"]["max_pair_gap_seconds"], 3600)
+        self.assertLessEqual(output["comparison_conditions"]["max_observed_pair_gap_seconds"], 2)
         receipt_path = evidence / "case-0.candidate.receipt.json"
         receipt = json.loads(receipt_path.read_text())
         receipt["auth_surface"] = "api_key"
@@ -450,6 +462,22 @@ raise SystemExit(23)
             evaluation.compile_report(self.campaign_path, evidence, grade_path)
         receipt["timeout_seconds"] = 10
         receipt_path.write_text(json.dumps(receipt))
+        original_observed_at = receipt["observed_at"]
+        receipt["observed_at"] = "2099-01-01T00:00:00Z"
+        receipt_path.write_text(json.dumps(receipt))
+        candidate_grade["receipt_sha256"] = evaluation.kernel.digest(receipt)
+        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
+                                          "campaign_sha256": evaluation.kernel.digest(self.campaign),
+                                          "grades": grades}))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "paired observations exceeded"):
+            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+        receipt["observed_at"] = original_observed_at
+        receipt_path.write_text(json.dumps(receipt))
+        candidate_grade["receipt_sha256"] = evaluation.kernel.digest(receipt)
+        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
+                                          "campaign_sha256": evaluation.kernel.digest(self.campaign),
+                                          "grades": grades}))
         original_latency = receipt["latency_ms"]
         receipt["latency_ms"] = 0
         receipt_path.write_text(json.dumps(receipt))
@@ -463,8 +491,6 @@ raise SystemExit(23)
         receipt["input_tokens"] += 1
         receipt_path.write_text(json.dumps(receipt))
         changed = evaluation.kernel.digest(receipt)
-        candidate_grade = next(grade for grade in grades
-                               if grade["case_id"] == "case-0" and grade["side"] == "candidate")
         candidate_grade["receipt_sha256"] = changed
         grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
                                           "campaign_sha256": evaluation.kernel.digest(self.campaign),
