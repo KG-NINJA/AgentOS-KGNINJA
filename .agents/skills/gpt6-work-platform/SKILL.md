@@ -58,14 +58,20 @@ regression or safety failure and at least 10% improvement in one measured
 operating metric. This is a local migration criterion, not an OpenAI requirement
 or financial backtest gate.
 
+Counterbalance which model runs first across the campaign. The baseline-first and
+candidate-first counts may differ by at most one, and the selected first side must
+complete before its mate starts. Do not let a fixed order or warm-cache effect be
+silently attributed to the candidate model.
+
 Bind every independent grade to the exact execution receipt and raw event-stream
 hash that was reviewed. Re-derive completion and token fields from the raw JSONL
 before aggregation; an evaluator reference without those evidence hashes is not a
 grade of the stored run.
 
 Do not batch all baseline observations long before all candidate observations.
-Reject pairs outside the fixed observation gap so provider or load drift cannot be
-silently presented as a model-only difference.
+Reject pairs outside the fixed observation gap and reject unbalanced execution
+order so provider load, time drift or cache order cannot be silently presented as
+a model-only difference.
 
 Passing supplied JSON only establishes structural eligibility for operator review.
 It does not authenticate model IDs, prove capability, install a skill or authorize

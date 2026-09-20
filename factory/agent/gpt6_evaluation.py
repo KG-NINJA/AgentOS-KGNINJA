@@ -27,8 +27,8 @@ import work_kernel as kernel  # noqa: E402
 from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
                            IncompatibleCodexCli, require_gpt6_cli)  # noqa: E402
 
-SCHEMA = "gpt6-evaluation.v3"
-RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v4"
+SCHEMA = "gpt6-evaluation.v4"
+RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v5"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v2"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
@@ -147,8 +147,9 @@ def load_campaign(path: Path) -> dict[str, Any]:
     ids: set[str] = set()
     prompts: set[str] = set()
     categories: set[str] = set()
+    first_side_counts = {"baseline": 0, "candidate": 0}
     for case in cases:
-        if type(case) is not dict or set(case) != {"id", "category", "prompt"}:
+        if type(case) is not dict or set(case) != {"id", "category", "prompt", "first_side"}:
             raise kernel.Rejected("invalid case schema")
         case_id = kernel.identifier(case["id"])
         category = kernel.identifier(case["category"])
@@ -161,8 +162,13 @@ def load_campaign(path: Path) -> dict[str, Any]:
         ids.add(case_id)
         prompts.add(prompt_sha)
         categories.add(category)
+        if case["first_side"] not in first_side_counts:
+            raise kernel.Rejected("first_side must be baseline or candidate")
+        first_side_counts[case["first_side"]] += 1
     if not CATEGORIES <= categories:
         raise kernel.Rejected("campaign is missing a required category")
+    if abs(first_side_counts["baseline"] - first_side_counts["candidate"]) > 1:
+        raise kernel.Rejected("campaign execution order must be counterbalanced")
     return data
 
 
@@ -176,6 +182,35 @@ def _case(campaign: dict[str, Any], case_id: str) -> dict[str, Any]:
     if len(matches) != 1:
         raise kernel.Rejected("unknown case")
     return matches[0]
+
+
+def _pair_order(case: dict[str, Any]) -> str:
+    return case["first_side"] + "-first"
+
+
+def _require_first_side_evidence(campaign: dict[str, Any], case: dict[str, Any],
+                                 side: str, evidence_dir: Path) -> None:
+    """Stop a second-side call until the campaign-selected first side completed."""
+    first_side = case["first_side"]
+    if side == first_side:
+        return
+    if evidence_dir.is_symlink():
+        raise kernel.Rejected("evidence directory must not be a symlink")
+    stem = case["id"] + "." + first_side
+    raw_path = evidence_dir / (stem + ".jsonl")
+    receipt_path = evidence_dir / (stem + ".receipt.json")
+    if (raw_path.is_symlink() or receipt_path.is_symlink()
+            or not raw_path.is_file() or not receipt_path.is_file()):
+        raise kernel.Rejected("campaign-selected first side must complete before second side")
+    receipt = kernel.load_json(receipt_path)
+    if (type(receipt) is not dict or receipt.get("schema_version") != RECEIPT_SCHEMA
+            or receipt.get("campaign_sha256") != kernel.digest(campaign)
+            or receipt.get("case_id") != case["id"]
+            or receipt.get("side") != first_side
+            or receipt.get("pair_order") != _pair_order(case)
+            or receipt.get("completed") is not True
+            or receipt.get("event_stream_sha256") != _sha_bytes(raw_path.read_bytes())):
+        raise kernel.Rejected("campaign-selected first side evidence is invalid")
 
 
 def _observed_epoch(value: Any) -> float:
@@ -410,6 +445,7 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
         timeout_seconds = campaign["timeout_seconds"]
     elif timeout_seconds != campaign["timeout_seconds"]:
         raise kernel.Rejected("timeout does not match campaign")
+    _require_first_side_evidence(campaign, case, side, evidence_dir)
     verify_workspace(workspace, campaign["source_commit"])
     model = campaign[side + "_model"]
     version = _codex_version(executable)
@@ -439,6 +475,7 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
                 "campaign_sha256": kernel.digest(campaign),
                 "case_id": case_id,
                 "side": side,
+                "pair_order": _pair_order(case),
                 "category": case["category"],
                 "budget_id": campaign["budget_id"],
                 "input_sha256": case_input_sha(campaign, case),
@@ -466,7 +503,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
         receipt_path = evidence_dir / (stem + ".receipt.json")
         _write_private_bytes(raw_path, raw)
         receipt = {"schema_version": RECEIPT_SCHEMA, "campaign_sha256": kernel.digest(campaign),
-                   "case_id": case_id, "side": side, "category": case["category"],
+                   "case_id": case_id, "side": side, "pair_order": _pair_order(case),
+                   "category": case["category"],
                    "requested_model": model, "requested_effort": campaign["effort"],
                     "budget_id": campaign["budget_id"], "timeout_seconds": timeout_seconds,
                     "max_pair_gap_seconds": campaign["max_pair_gap_seconds"],
@@ -540,6 +578,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
     campaign_auth_surface: str | None = None
     campaign_codex_version: str | None = None
     max_observed_pair_gap_seconds = 0.0
+    order_counts = {"baseline-first": 0, "candidate-first": 0}
     for case in campaign["cases"]:
         pair = {"id": case["id"], "input_sha256": case_input_sha(campaign, case),
                 "category": case["category"], "budget_id": campaign["budget_id"]}
@@ -548,7 +587,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
             receipt_path = evidence_dir / f"{case['id']}.{side}.receipt.json"
             raw_path = evidence_dir / f"{case['id']}.{side}.jsonl"
             receipt = kernel.load_json(receipt_path)
-            expected = {"schema_version", "campaign_sha256", "case_id", "side", "category",
+            expected = {"schema_version", "campaign_sha256", "case_id", "side", "pair_order", "category",
                         "requested_model", "requested_effort", "budget_id", "input_sha256",
                         "timeout_seconds", "max_pair_gap_seconds", "prompt_sha256",
                         "source_commit", "codex_version",
@@ -562,6 +601,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
             receipt_codex_version = _validated_codex_version(receipt["codex_version"])
             if (receipt["schema_version"] != RECEIPT_SCHEMA or receipt["campaign_sha256"] != kernel.digest(campaign)
                     or receipt["case_id"] != case["id"] or receipt["side"] != side
+                    or receipt["pair_order"] != _pair_order(case)
                     or receipt["category"] != case["category"]
                     or receipt["requested_model"] != campaign[side + "_model"]
                     or receipt["requested_effort"] != campaign["effort"]
@@ -614,6 +654,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
         if pair_gap > campaign["max_pair_gap_seconds"]:
             raise kernel.Rejected("paired observations exceeded max_pair_gap_seconds")
         max_observed_pair_gap_seconds = max(max_observed_pair_gap_seconds, pair_gap)
+        order_counts[_pair_order(case)] += 1
         pairs.append(pair)
     if len(grade_map) != len(pairs) * 2:
         raise kernel.Rejected("grades contain cases outside campaign")
@@ -624,7 +665,9 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
                                        "auth_surface": campaign_auth_surface,
                                        "timeout_seconds": campaign["timeout_seconds"],
                                        "max_pair_gap_seconds": campaign["max_pair_gap_seconds"],
-                                       "max_observed_pair_gap_seconds": max_observed_pair_gap_seconds},
+                                       "max_observed_pair_gap_seconds": max_observed_pair_gap_seconds,
+                                       "baseline_first_pairs": order_counts["baseline-first"],
+                                       "candidate_first_pairs": order_counts["candidate-first"]},
             "provider_authenticity_note": "CLI receipts record requested models and coarse authentication surfaces; independent provider identity and entitlement remain unverified."}
 
 

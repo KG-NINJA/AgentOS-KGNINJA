@@ -24,6 +24,7 @@ def campaign(commit: str) -> dict:
             "max_pair_gap_seconds": 3600,
             "source_commit": commit,
             "cases": [{"id": f"case-{i}",
+                       "first_side": "candidate" if i % 2 == 0 else "baseline",
                        "category": sorted(evaluation.CATEGORIES)[i % len(evaluation.CATEGORIES)],
                        "prompt": f"Inspect fixture case {i} without changing files."} for i in range(30)]}
 
@@ -95,6 +96,13 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
                 with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                             "max_pair_gap_seconds must be"):
                     evaluation.load_campaign(path)
+        unbalanced = json.loads(json.dumps(self.campaign))
+        for case in unbalanced["cases"]:
+            case["first_side"] = "baseline"
+        path.write_text(json.dumps(unbalanced))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "execution order must be counterbalanced"):
+            evaluation.load_campaign(path)
 
     def test_dirty_or_wrong_workspace_is_rejected(self):
         (self.workspace / "fixture.txt").write_text("changed\n")
@@ -180,6 +188,16 @@ raise SystemExit(99)
                                         "timeout does not match campaign"):
                 evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
                                    self.root / "evidence", 9, str(self.fake))
+        version.assert_not_called()
+        execute.assert_not_called()
+
+    def test_collect_rejects_second_side_before_campaign_first_side(self):
+        with mock.patch.object(evaluation, "_codex_version") as version, \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                        "first side must complete"):
+                evaluation.collect(self.campaign_path, "case-1", "candidate", self.workspace,
+                                   self.root / "evidence", 10, str(self.fake))
         version.assert_not_called()
         execute.assert_not_called()
 
@@ -414,7 +432,8 @@ raise SystemExit(23)
         evidence = self.root / "evidence"
         grades = []
         for case in self.campaign["cases"]:
-            for side in ("baseline", "candidate"):
+            second_side = "candidate" if case["first_side"] == "baseline" else "baseline"
+            for side in (case["first_side"], second_side):
                 result = evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
                                             evidence, 10, str(self.fake))
                 grades.append(bound_grade(result, case["id"], side))
@@ -434,6 +453,8 @@ raise SystemExit(23)
         self.assertEqual(output["comparison_conditions"]["timeout_seconds"], 10)
         self.assertEqual(output["comparison_conditions"]["max_pair_gap_seconds"], 3600)
         self.assertLessEqual(output["comparison_conditions"]["max_observed_pair_gap_seconds"], 2)
+        self.assertEqual(output["comparison_conditions"]["baseline_first_pairs"], 15)
+        self.assertEqual(output["comparison_conditions"]["candidate_first_pairs"], 15)
         receipt_path = evidence / "case-0.candidate.receipt.json"
         receipt = json.loads(receipt_path.read_text())
         receipt["auth_surface"] = "api_key"
@@ -522,7 +543,8 @@ raise SystemExit(23)
         evidence = self.root / "evidence"
         grades = []
         for case in self.campaign["cases"]:
-            for side in ("baseline", "candidate"):
+            second_side = "candidate" if case["first_side"] == "baseline" else "baseline"
+            for side in (case["first_side"], second_side):
                 result = evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
                                             evidence, 10, str(self.fake))
                 grades.append(bound_grade(result, case["id"], side))

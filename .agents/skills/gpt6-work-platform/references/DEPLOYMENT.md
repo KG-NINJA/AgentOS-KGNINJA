@@ -85,6 +85,8 @@ across research, coding, files, tool routing and safety. Match data/tools/budget
 execution timeouts, effective effort and a campaign-fixed maximum observation gap
 for every baseline/candidate pair; record source receipts, prompt/input hashes,
 safety, correctness, evidence coverage, latency, input tokens and cost.
+Counterbalance baseline-first and candidate-first cases (counts may differ by at
+most one), and complete the campaign-selected first side before its mate starts.
 Independent grades must name the exact receipt and raw event-stream hashes they
 reviewed. Compilation re-derives token counts and completion hashes from that raw
 JSONL and rejects evidence changed after grading.
