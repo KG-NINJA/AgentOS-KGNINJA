@@ -55,6 +55,10 @@ class EvaluationTests(unittest.TestCase):
         self.commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.workspace,
                                      check=True, capture_output=True, text=True).stdout.strip()
         self.campaign = campaign(self.commit)
+        self.candidate_case_id = next(case["id"] for case in self.campaign["cases"]
+                                      if case["first_side"] == "candidate")
+        self.baseline_case_id = next(case["id"] for case in self.campaign["cases"]
+                                     if case["first_side"] == "baseline")
         self.campaign_path = self.root / "campaign.json"
         self.campaign_path.write_text(json.dumps(self.campaign))
         self.fake = self.root / "codex"
@@ -183,19 +187,20 @@ raise SystemExit(99)
 
     def test_collect_uses_frozen_pair_and_private_files(self):
         evidence = self.root / "evidence"
-        result = evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
+        result = evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate", self.workspace,
                                     evidence, 10, str(self.fake))
         self.assertEqual(result["requested_model"], "gpt-6-astra")
         self.assertEqual(result["source_commit"], self.commit)
         self.assertEqual(os.stat(evidence).st_mode & 0o777, 0o700)
-        self.assertEqual(os.stat(evidence / "case-0.candidate.receipt.json").st_mode & 0o777, 0o600)
+        receipt_path = evidence / f"{self.candidate_case_id}.candidate.receipt.json"
+        self.assertEqual(os.stat(receipt_path).st_mode & 0o777, 0o600)
 
     def test_collect_rejects_timeout_mismatch_before_model_call(self):
         with mock.patch.object(evaluation, "_codex_version") as version, \
                 mock.patch.object(evaluation, "execute") as execute:
             with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                         "timeout does not match campaign"):
-                evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
+                evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate", self.workspace,
                                    self.root / "evidence", 9, str(self.fake))
         version.assert_not_called()
         execute.assert_not_called()
@@ -205,7 +210,7 @@ raise SystemExit(99)
                 mock.patch.object(evaluation, "execute") as execute:
             with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                         "first side must complete"):
-                evaluation.collect(self.campaign_path, "case-1", "candidate", self.workspace,
+                evaluation.collect(self.campaign_path, self.baseline_case_id, "candidate", self.workspace,
                                    self.root / "evidence", 10, str(self.fake))
         version.assert_not_called()
         execute.assert_not_called()
@@ -222,11 +227,12 @@ raise SystemExit(99)
         with mock.patch.object(evaluation, "execute", side_effect=execute_then_mutate):
             with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                         "workspace must be clean"):
-                evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
+                evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate", self.workspace,
                                    evidence, 10, str(self.fake))
-        self.assertTrue((evidence / ".case-0.candidate.lock").is_file())
-        self.assertFalse((evidence / "case-0.candidate.receipt.json").exists())
-        self.assertFalse((evidence / "case-0.candidate.jsonl").exists())
+        stem = self.candidate_case_id + ".candidate"
+        self.assertTrue((evidence / ("." + stem + ".lock")).is_file())
+        self.assertFalse((evidence / (stem + ".receipt.json")).exists())
+        self.assertFalse((evidence / (stem + ".jsonl")).exists())
 
     def test_timeout_preserves_private_partial_evidence_without_counting_completion(self):
         slow = self.root / "slow-codex"
@@ -245,7 +251,7 @@ time.sleep(5)
         self.campaign_path.write_text(json.dumps(self.campaign))
         evidence = self.root / "evidence"
         with self.assertRaises(evaluation.CodexRunBlocked) as raised:
-            evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
+            evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate", self.workspace,
                                evidence, 1, str(slow))
         summary = raised.exception.summary
         self.assertFalse(summary["completed"])
@@ -258,7 +264,7 @@ time.sleep(5)
         self.assertTrue(receipt.is_file())
         self.assertIn("private-thread", raw.read_text())
         self.assertEqual(receipt.parent.parent, evidence / "blocked")
-        self.assertFalse((evidence / ".case-0.candidate.lock").exists())
+        self.assertFalse((evidence / f".{self.candidate_case_id}.candidate.lock").exists())
         self.assertEqual(os.stat(receipt).st_mode & 0o777, 0o600)
         self.assertEqual(os.stat(raw).st_mode & 0o777, 0o600)
 
@@ -278,7 +284,7 @@ raise SystemExit(23)
         failed.chmod(0o755)
         evidence = self.root / "evidence"
         with self.assertRaises(evaluation.CodexRunBlocked) as raised:
-            evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
+            evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate", self.workspace,
                                evidence, 10, str(failed))
         summary = raised.exception.summary
         self.assertEqual(summary["reason"], "process-failure")
@@ -320,7 +326,7 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
         incomplete.chmod(0o755)
         evidence = self.root / "evidence"
         with self.assertRaises(evaluation.CodexRunBlocked) as raised:
-            evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
+            evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate", self.workspace,
                                evidence, 10, str(incomplete))
         summary = raised.exception.summary
         self.assertEqual(summary["reason"], "invalid-or-incomplete-event-stream")
@@ -333,12 +339,12 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
 
     def test_completed_evidence_is_never_overwritten_or_reexecuted(self):
         evidence = self.root / "evidence"
-        first = evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
+        first = evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate", self.workspace,
                                    evidence, 10, str(self.fake))
         before = Path(first["receipt_path"]).read_bytes()
         with mock.patch.object(evaluation, "execute") as execute:
             with self.assertRaises(evaluation.kernel.Rejected):
-                evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
+                evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate", self.workspace,
                                    evidence, 10, str(self.fake))
         execute.assert_not_called()
         self.assertEqual(Path(first["receipt_path"]).read_bytes(), before)
@@ -346,11 +352,11 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
     def test_concurrent_or_uncertain_attempt_is_not_reissued(self):
         evidence = self.root / "evidence"
         evidence.mkdir(mode=0o700)
-        lock = evidence / ".case-0.candidate.lock"
+        lock = evidence / f".{self.candidate_case_id}.candidate.lock"
         lock.write_text("existing uncertain attempt\n")
         with mock.patch.object(evaluation, "execute") as execute:
             with self.assertRaises(evaluation.kernel.Rejected):
-                evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
+                evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate", self.workspace,
                                    evidence, 10, str(self.fake))
         execute.assert_not_called()
         self.assertEqual(lock.read_text(), "existing uncertain attempt\n")
@@ -362,7 +368,7 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
         evidence.symlink_to(real, target_is_directory=True)
         with mock.patch.object(evaluation, "execute") as execute:
             with self.assertRaises(evaluation.kernel.Rejected):
-                evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
+                evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate", self.workspace,
                                    evidence, 10, str(self.fake))
         execute.assert_not_called()
         self.assertEqual(list(real.iterdir()), [])
@@ -383,12 +389,12 @@ raise SystemExit(23)
         receipts = []
         for _ in range(2):
             with self.assertRaises(evaluation.CodexRunBlocked) as raised:
-                evaluation.collect(self.campaign_path, "case-0", "candidate", self.workspace,
+                evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate", self.workspace,
                                    evidence, 10, str(failed))
             receipts.append(Path(raised.exception.receipt_path))
         self.assertNotEqual(receipts[0].parent, receipts[1].parent)
         self.assertTrue(all(path.is_file() for path in receipts))
-        self.assertFalse((evidence / ".case-0.candidate.lock").exists())
+        self.assertFalse((evidence / f".{self.candidate_case_id}.candidate.lock").exists())
 
     def test_completion_without_thread_id_is_blocked(self):
         events = b"\n".join((
@@ -451,7 +457,8 @@ raise SystemExit(23)
                                           "campaign_sha256": evaluation.kernel.digest(self.campaign),
                                           "grades": grades}))
         candidate_grade = next(grade for grade in grades
-                               if grade["case_id"] == "case-0" and grade["side"] == "candidate")
+                               if grade["case_id"] == self.candidate_case_id
+                               and grade["side"] == "candidate")
         output = evaluation.compile_report(self.campaign_path, evidence, grade_path)
         self.assertEqual(output["gate"]["paired_cases"], 30)
         self.assertFalse(output["gate"]["activated"])
@@ -464,7 +471,7 @@ raise SystemExit(23)
         self.assertLessEqual(output["comparison_conditions"]["max_observed_pair_gap_seconds"], 2)
         self.assertEqual(output["comparison_conditions"]["baseline_first_pairs"], 15)
         self.assertEqual(output["comparison_conditions"]["candidate_first_pairs"], 15)
-        receipt_path = evidence / "case-0.candidate.receipt.json"
+        receipt_path = evidence / f"{self.candidate_case_id}.candidate.receipt.json"
         receipt = json.loads(receipt_path.read_text())
         receipt["auth_surface"] = "api_key"
         receipt_path.write_text(json.dumps(receipt))
@@ -557,7 +564,7 @@ raise SystemExit(23)
                 result = evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
                                             evidence, 10, str(self.fake))
                 grades.append(bound_grade(result, case["id"], side))
-        (evidence / "case-0.candidate.jsonl").write_text('{"type":"error"}\n')
+        (evidence / f"{self.candidate_case_id}.candidate.jsonl").write_text('{"type":"error"}\n')
         grade_path = self.root / "grades-corrupt.json"
         grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
                                           "campaign_sha256": evaluation.kernel.digest(self.campaign),
