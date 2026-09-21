@@ -18,15 +18,16 @@ import gpt6_evaluation as evaluation
 
 
 def campaign(commit: str) -> dict:
+    cases = [{"id": f"case-{i}", "first_side": "baseline",
+              "category": sorted(evaluation.CATEGORIES)[i % len(evaluation.CATEGORIES)],
+              "prompt": f"Inspect fixture case {i} without changing files."} for i in range(30)]
+    schedule = evaluation._counterbalanced_first_sides(commit, cases)
+    for case in cases:
+        case["first_side"] = schedule[case["id"]]
     return {"schema_version": evaluation.SCHEMA, "baseline_model": "gpt-5.3-codex",
             "candidate_model": "gpt-6-astra", "effort": "high", "budget_id": "frozen-budget",
-            "timeout_seconds": 10,
-            "max_pair_gap_seconds": 3600,
-            "source_commit": commit,
-            "cases": [{"id": f"case-{i}",
-                       "first_side": "candidate" if i % 2 == 0 else "baseline",
-                       "category": sorted(evaluation.CATEGORIES)[i % len(evaluation.CATEGORIES)],
-                       "prompt": f"Inspect fixture case {i} without changing files."} for i in range(30)]}
+            "timeout_seconds": 10, "max_pair_gap_seconds": 3600,
+            "source_commit": commit, "cases": cases}
 
 
 def bound_grade(result: dict, case_id: str, side: str) -> dict:
@@ -102,6 +103,14 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
         path.write_text(json.dumps(unbalanced))
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "execution order must be counterbalanced"):
+            evaluation.load_campaign(path)
+        selected = json.loads(json.dumps(self.campaign))
+        baseline = next(case for case in selected["cases"] if case["first_side"] == "baseline")
+        candidate = next(case for case in selected["cases"] if case["first_side"] == "candidate")
+        baseline["first_side"], candidate["first_side"] = candidate["first_side"], baseline["first_side"]
+        path.write_text(json.dumps(selected))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "deterministic campaign schedule"):
             evaluation.load_campaign(path)
 
     def test_dirty_or_wrong_workspace_is_rejected(self):

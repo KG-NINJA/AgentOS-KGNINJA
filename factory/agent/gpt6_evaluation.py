@@ -27,8 +27,8 @@ import work_kernel as kernel  # noqa: E402
 from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
                            IncompatibleCodexCli, require_gpt6_cli)  # noqa: E402
 
-SCHEMA = "gpt6-evaluation.v4"
-RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v5"
+SCHEMA = "gpt6-evaluation.v5"
+RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v6"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v2"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
@@ -119,6 +119,20 @@ def _blocked_attempt_dir(evidence_dir: Path, stem: str) -> Path:
     return attempt
 
 
+def _counterbalanced_first_sides(source_commit: str,
+                                 cases: list[dict[str, Any]]) -> dict[str, str]:
+    """Derive a balanced order from frozen inputs instead of operator preference."""
+    ranked = sorted(
+        (_sha_bytes((source_commit + "\0" + case["id"] + "\0"
+                     + _sha_bytes(case["prompt"].encode("utf-8"))).encode("utf-8")),
+         case["id"])
+        for case in cases
+    )
+    baseline_count = len(ranked) // 2
+    return {case_id: ("baseline" if index < baseline_count else "candidate")
+            for index, (_, case_id) in enumerate(ranked)}
+
+
 def load_campaign(path: Path) -> dict[str, Any]:
     data = kernel.load_json(path)
     expected = {"schema_version", "baseline_model", "candidate_model", "effort",
@@ -169,6 +183,9 @@ def load_campaign(path: Path) -> dict[str, Any]:
         raise kernel.Rejected("campaign is missing a required category")
     if abs(first_side_counts["baseline"] - first_side_counts["candidate"]) > 1:
         raise kernel.Rejected("campaign execution order must be counterbalanced")
+    expected_first_sides = _counterbalanced_first_sides(data["source_commit"], cases)
+    if any(case["first_side"] != expected_first_sides[case["id"]] for case in cases):
+        raise kernel.Rejected("first_side does not match deterministic campaign schedule")
     return data
 
 

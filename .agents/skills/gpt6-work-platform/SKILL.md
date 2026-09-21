@@ -62,6 +62,9 @@ Counterbalance which model runs first across the campaign. The baseline-first an
 candidate-first counts may differ by at most one, and the selected first side must
 complete before its mate starts. Do not let a fixed order or warm-cache effect be
 silently attributed to the candidate model.
+Derive that order deterministically from the frozen source commit, case identifiers
+and prompt hashes. A balanced but manually selected order is not an equivalent
+campaign because it can assign favorable order to chosen cases after inspection.
 
 Bind every independent grade to the exact execution receipt and raw event-stream
 hash that was reviewed. Re-derive completion and token fields from the raw JSONL

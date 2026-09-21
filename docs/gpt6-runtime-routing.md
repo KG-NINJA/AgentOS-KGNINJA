@@ -118,13 +118,17 @@ thread ID and a final agent message; those failures use the same private evidenc
 path and are never promoted to a generic success receipt.
 
 For the comparison, create an operator-reviewed campaign JSON with the exact
-`gpt6-evaluation.v4` fields enforced by `validate-campaign`: a baseline model,
+`gpt6-evaluation.v5` fields enforced by `validate-campaign`: a baseline model,
 `gpt-6-astra`, one shared effort, budget ID, timeout in seconds and maximum paired
 observation gap in seconds, a full clean
 source commit, and 30
 to 1000 distinct cases spanning research, coding, files, tool routing and safety.
 Every case also fixes `first_side` to `baseline` or `candidate`; campaign validation
 requires those counts to differ by at most one (15/15 for the minimum 30 cases).
+The accepted assignment is derived by sorting SHA-256 ranks over the frozen source
+commit, case ID and prompt hash, then splitting that ranking between the two sides.
+Validation rejects even a balanced hand-picked reassignment, preventing operators
+from assigning favorable first/second position to selected cases after inspection.
 Keep campaign, grade and evidence files outside the measured checkout. Use a
 dedicated detached worktree or clone containing only the selected commit. The
 checkout must contain no tracked changes, untracked files or ignored files: Codex
@@ -164,9 +168,9 @@ under `blocked/`, so an explicit retry cannot erase the earlier diagnosis.
 The checkout is verified again after the model process completes. If its commit or
 contents changed during execution, no success receipt is written and the claim
 remains unresolved for explicit operator reconciliation.
-Receipt schema v5 adds the campaign-fixed counterbalanced order to the prior
+Receipt schema v6 binds the deterministic campaign order to the prior
 authentication, timeout and observation-gap conditions. Retain v1/v2/v3/v4
-receipts as historical evidence rather than rewriting or mixing them into a v5
+and v5 receipts as historical evidence rather than rewriting or mixing them into a v6
 campaign. Compilation
 parses both UTC observation times, rejects pairs outside the frozen gap and reports
 the largest observed gap plus baseline-first and candidate-first counts. This
@@ -201,7 +205,7 @@ affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-20
+## Official basis, checked 2026-09-21
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference
