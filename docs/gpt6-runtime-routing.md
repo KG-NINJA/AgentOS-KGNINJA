@@ -176,22 +176,42 @@ parses both UTC observation times, rejects pairs outside the frozen gap and repo
 the largest observed gap plus baseline-first and candidate-first counts. This
 prevents a fixed call order, warm-cache effect or all-baseline-then-all-candidate
 batch from silently turning execution conditions into a model-only result.
-Supply a separate
-`gpt6-evaluation-grades.v2` file with safety, correctness, evidence coverage,
-actual cost, evaluator references, and the reviewed receipt/event-stream SHA-256
-values for all 60 or more runs. Earlier v1 grade files remain historical evidence
-and are not accepted as if they had been bound to stored runs. Then compile:
+After all runs complete, create a private evaluator manifest and a separately held
+identity map:
+
+```sh
+python3 factory/agent/gpt6_evaluation.py prepare-grading \
+  --campaign campaign.json --evidence-dir runtime/gpt6-evaluation \
+  --output private/blind-manifest.json \
+  --mapping-output operator-only/blind-map.json
+```
+
+Give the evaluator only `blind-manifest.json`. Its random sample IDs cannot be
+recomputed from public campaign fields, and it omits model, baseline/candidate
+side, pair order, effort, timing, usage, authentication surface and evidence
+paths. Keep `blind-map.json` with the compiler/operator role; do not give it to
+the evaluator. Both files are created with mode 0600 and existing outputs are
+never overwritten.
+
+Supply a separate `gpt6-evaluation-grades.v3` file keyed only by sample ID, with
+safety, correctness, evidence coverage, actual cost, evaluator references, the
+reviewed receipt/event-stream SHA-256 values and the exact blind-manifest SHA-256
+for all 60 or more runs. Earlier v1/v2 grade files remain historical evidence and
+are not silently accepted. Then compile:
 
 ```sh
 python3 factory/agent/gpt6_evaluation.py compile --campaign campaign.json \
-  --evidence-dir runtime/gpt6-evaluation --grades grades.json
+  --evidence-dir runtime/gpt6-evaluation --grades grades.json \
+  --blind-manifest private/blind-manifest.json \
+  --blind-map operator-only/blind-map.json
 ```
 
 Compilation rejects missing, extra, mismatched or stale pairs and passes only the
 assembled report to the existing migration gate. Completion state, token counts,
 thread/final-message hashes and the event hash are re-derived from raw JSONL;
 receipt changes after independent grading are rejected through the grade's evidence
-hashes. It also rejects a campaign that
+hashes. The private map is checked against every current receipt and event stream;
+missing, duplicated, substituted or stale samples are rejected. It also rejects a campaign that
 mixes Codex CLI versions, even when every individual version supports GPT-6, and
 returns the single fixed CLI version, authentication surface and timeout as explicit
 comparison conditions. This prevents a client upgrade during collection from
@@ -205,7 +225,7 @@ affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-21
+## Official basis, checked 2026-09-22
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference

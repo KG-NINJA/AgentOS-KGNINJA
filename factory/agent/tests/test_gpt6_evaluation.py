@@ -30,13 +30,28 @@ def campaign(commit: str) -> dict:
             "source_commit": commit, "cases": cases}
 
 
-def bound_grade(result: dict, case_id: str, side: str) -> dict:
-    receipt = evaluation.kernel.load_json(Path(result["receipt_path"]))
-    return {"case_id": case_id, "side": side, "safety_pass": True,
+def bound_grade(sample: dict) -> dict:
+    return {"sample_id": sample["sample_id"], "safety_pass": True,
             "correctness": 1.0, "evidence_coverage": 1.0, "cost": 0.0,
-            "evaluator_ref": f"fixture-grade:{case_id}:{side}",
-            "receipt_sha256": evaluation.kernel.digest(receipt),
-            "event_stream_sha256": receipt["event_stream_sha256"]}
+            "evaluator_ref": f"fixture-grade:{sample['sample_id']}",
+            "receipt_sha256": sample["receipt_sha256"],
+            "event_stream_sha256": sample["event_stream_sha256"]}
+
+
+def prepare_grades(root: Path, campaign_path: Path, evidence: Path,
+                   suffix: str = "") -> tuple[Path, Path, Path, list[dict], dict]:
+    manifest_path = root / f"blind{suffix}.json"
+    mapping_path = root / f"blind-map{suffix}.json"
+    evaluation.prepare_blind_grading(campaign_path, evidence, manifest_path, mapping_path)
+    manifest = evaluation.kernel.load_json(manifest_path)
+    mapping = evaluation.kernel.load_json(mapping_path)
+    grades = [bound_grade(sample) for sample in mapping["samples"]]
+    grade_path = root / f"grades{suffix}.json"
+    grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
+                                      "campaign_sha256": mapping["campaign_sha256"],
+                                      "blind_manifest_sha256": mapping["blind_manifest_sha256"],
+                                      "grades": grades}))
+    return manifest_path, mapping_path, grade_path, grades, manifest
 
 
 class EvaluationTests(unittest.TestCase):
@@ -445,132 +460,144 @@ raise SystemExit(23)
 
     def test_compile_requires_separate_complete_grades(self):
         evidence = self.root / "evidence"
-        grades = []
         for case in self.campaign["cases"]:
             second_side = "candidate" if case["first_side"] == "baseline" else "baseline"
             for side in (case["first_side"], second_side):
-                result = evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
-                                            evidence, 10, str(self.fake))
-                grades.append(bound_grade(result, case["id"], side))
-        grade_path = self.root / "grades.json"
-        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
-                                          "campaign_sha256": evaluation.kernel.digest(self.campaign),
-                                          "grades": grades}))
-        candidate_grade = next(grade for grade in grades
-                               if grade["case_id"] == self.candidate_case_id
-                               and grade["side"] == "candidate")
-        output = evaluation.compile_report(self.campaign_path, evidence, grade_path)
+                evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
+                                   evidence, 10, str(self.fake))
+        manifest_path, mapping_path, grade_path, grades, manifest = prepare_grades(
+            self.root, self.campaign_path, evidence)
+        manifest_text = manifest_path.read_text()
+        for forbidden in ('"side"', '"requested_model"', '"pair_order"',
+                          '"requested_effort"', '"latency_ms"', '"auth_surface"'):
+            self.assertNotIn(forbidden, manifest_text)
+        self.assertEqual(len(manifest["samples"]), 60)
+        output = evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                           manifest_path, mapping_path)
         self.assertEqual(output["gate"]["paired_cases"], 30)
         self.assertFalse(output["gate"]["activated"])
         self.assertFalse(output["gate"]["provider_authenticity_verified"])
         self.assertIn("no_10_percent_operational_improvement", output["gate"]["reasons"])
         self.assertEqual(output["comparison_conditions"]["codex_version"], "codex-cli 9.9.9")
         self.assertEqual(output["comparison_conditions"]["auth_surface"], "chatgpt")
+        self.assertEqual(output["comparison_conditions"]["blind_manifest_sha256"],
+                         evaluation.kernel.digest(manifest))
+        self.assertTrue(output["comparison_conditions"]["independent_grading_blinded"])
         self.assertEqual(output["comparison_conditions"]["timeout_seconds"], 10)
         self.assertEqual(output["comparison_conditions"]["max_pair_gap_seconds"], 3600)
         self.assertLessEqual(output["comparison_conditions"]["max_observed_pair_gap_seconds"], 2)
         self.assertEqual(output["comparison_conditions"]["baseline_first_pairs"], 15)
         self.assertEqual(output["comparison_conditions"]["candidate_first_pairs"], 15)
+        self.assertEqual(os.stat(manifest_path).st_mode & 0o777, 0o600)
+        self.assertEqual(os.stat(mapping_path).st_mode & 0o777, 0o600)
+        alt_manifest_path, _, _, _, alt_manifest = prepare_grades(
+            self.root, self.campaign_path, evidence, "-alt")
+        self.assertTrue({sample["sample_id"] for sample in manifest["samples"]}.isdisjoint(
+            {sample["sample_id"] for sample in alt_manifest["samples"]}))
+        self.assertNotEqual(evaluation.kernel.digest(manifest),
+                            evaluation.kernel.digest(alt_manifest))
+        self.assertEqual(os.stat(alt_manifest_path).st_mode & 0o777, 0o600)
+        manifest_doc = evaluation.kernel.load_json(manifest_path)
+        manifest_doc["samples"][0]["final_message"] += " tampered"
+        manifest_path.write_text(json.dumps(manifest_doc))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected, "invalid blind mapping"):
+            evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                      manifest_path, mapping_path)
+        manifest_path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected, "must be new distinct"):
+            evaluation.prepare_blind_grading(self.campaign_path, evidence,
+                                             manifest_path, mapping_path)
         receipt_path = evidence / f"{self.candidate_case_id}.candidate.receipt.json"
         receipt = json.loads(receipt_path.read_text())
         receipt["auth_surface"] = "api_key"
         receipt_path.write_text(json.dumps(receipt))
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "authentication surface changed"):
-            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+            evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                      manifest_path, mapping_path)
         receipt["auth_surface"] = "chatgpt"
         receipt_path.write_text(json.dumps(receipt))
         receipt["codex_version"] = "codex-cli 0.152.0"
         receipt_path.write_text(json.dumps(receipt))
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "Codex CLI version is incompatible"):
-            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+            evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                      manifest_path, mapping_path)
         receipt["codex_version"] = "codex-cli 9.9.8"
         receipt_path.write_text(json.dumps(receipt))
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "Codex CLI version changed"):
-            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+            evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                      manifest_path, mapping_path)
         receipt["codex_version"] = "codex-cli 9.9.9"
         receipt_path.write_text(json.dumps(receipt))
         receipt["timeout_seconds"] = 9
         receipt_path.write_text(json.dumps(receipt))
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "receipt does not match campaign"):
-            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+            evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                      manifest_path, mapping_path)
         receipt["timeout_seconds"] = 10
         receipt_path.write_text(json.dumps(receipt))
         original_observed_at = receipt["observed_at"]
         receipt["observed_at"] = "2099-01-01T00:00:00Z"
         receipt_path.write_text(json.dumps(receipt))
-        candidate_grade["receipt_sha256"] = evaluation.kernel.digest(receipt)
-        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
-                                          "campaign_sha256": evaluation.kernel.digest(self.campaign),
-                                          "grades": grades}))
+        gap_manifest, gap_mapping, gap_grades_path, _, _ = prepare_grades(
+            self.root, self.campaign_path, evidence, "-gap")
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "paired observations exceeded"):
-            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+            evaluation.compile_report(self.campaign_path, evidence, gap_grades_path,
+                                      gap_manifest, gap_mapping)
         receipt["observed_at"] = original_observed_at
         receipt_path.write_text(json.dumps(receipt))
-        candidate_grade["receipt_sha256"] = evaluation.kernel.digest(receipt)
-        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
-                                          "campaign_sha256": evaluation.kernel.digest(self.campaign),
-                                          "grades": grades}))
         original_latency = receipt["latency_ms"]
         receipt["latency_ms"] = 0
         receipt_path.write_text(json.dumps(receipt))
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "invalid completion metrics"):
-            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+            evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                      manifest_path, mapping_path)
         receipt["latency_ms"] = original_latency
         receipt_path.write_text(json.dumps(receipt))
         # Binding is checked separately from fields that can be re-derived from JSONL.
         original_input_tokens = receipt["input_tokens"]
         receipt["input_tokens"] += 1
         receipt_path.write_text(json.dumps(receipt))
-        changed = evaluation.kernel.digest(receipt)
-        candidate_grade["receipt_sha256"] = changed
-        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
-                                          "campaign_sha256": evaluation.kernel.digest(self.campaign),
-                                          "grades": grades}))
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "completion metrics do not match raw evidence"):
-            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+            evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                      manifest_path, mapping_path)
         receipt["input_tokens"] = original_input_tokens
         receipt_path.write_text(json.dumps(receipt))
-        candidate_grade["receipt_sha256"] = evaluation.kernel.digest(receipt)
-        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
-                                          "campaign_sha256": evaluation.kernel.digest(self.campaign),
-                                          "grades": grades}))
         receipt["latency_ms"] += 1
         receipt_path.write_text(json.dumps(receipt))
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
-                                    "independent grade is not bound to evidence"):
-            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+                                    "blind manifest or mapping does not match evidence"):
+            evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                      manifest_path, mapping_path)
         receipt["latency_ms"] -= 1
         receipt_path.write_text(json.dumps(receipt))
         grades.pop()
-        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
-                                          "campaign_sha256": evaluation.kernel.digest(self.campaign),
-                                          "grades": grades}))
+        grade_doc = evaluation.kernel.load_json(grade_path)
+        grade_doc["grades"] = grades
+        grade_path.write_text(json.dumps(grade_doc))
         with self.assertRaises(evaluation.kernel.Rejected):
-            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+            evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                      manifest_path, mapping_path)
 
     def test_compile_rejects_corrupted_raw_evidence(self):
         evidence = self.root / "evidence"
-        grades = []
         for case in self.campaign["cases"]:
             second_side = "candidate" if case["first_side"] == "baseline" else "baseline"
             for side in (case["first_side"], second_side):
-                result = evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
-                                            evidence, 10, str(self.fake))
-                grades.append(bound_grade(result, case["id"], side))
+                evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
+                                   evidence, 10, str(self.fake))
+        manifest_path, mapping_path, grade_path, _, _ = prepare_grades(
+            self.root, self.campaign_path, evidence, "-corrupt")
         (evidence / f"{self.candidate_case_id}.candidate.jsonl").write_text('{"type":"error"}\n')
-        grade_path = self.root / "grades-corrupt.json"
-        grade_path.write_text(json.dumps({"schema_version": evaluation.GRADE_SCHEMA,
-                                          "campaign_sha256": evaluation.kernel.digest(self.campaign),
-                                          "grades": grades}))
         with self.assertRaises(evaluation.kernel.Rejected):
-            evaluation.compile_report(self.campaign_path, evidence, grade_path)
+            evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                      manifest_path, mapping_path)
 
     def test_malformed_event_stream_is_rejected(self):
         with self.assertRaises(evaluation.kernel.Rejected):

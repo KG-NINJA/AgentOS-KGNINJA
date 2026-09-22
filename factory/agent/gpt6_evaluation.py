@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -29,7 +30,9 @@ from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
 
 SCHEMA = "gpt6-evaluation.v5"
 RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v6"
-GRADE_SCHEMA = "gpt6-evaluation-grades.v2"
+BLIND_SCHEMA = "gpt6-evaluation-blind.v1"
+BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v1"
+GRADE_SCHEMA = "gpt6-evaluation-grades.v3"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
 AUTH_SURFACES = {"chatgpt", "api_key", "access_token"}
@@ -562,23 +565,163 @@ def probe(effort: str, workspace: Path, timeout_seconds: int,
             "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **summary}
 
 
-def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -> dict[str, Any]:
+def _blind_sample(campaign: dict[str, Any], case: dict[str, Any], side: str,
+                  evidence_dir: Path, sample_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    receipt_path = evidence_dir / f"{case['id']}.{side}.receipt.json"
+    raw_path = evidence_dir / f"{case['id']}.{side}.jsonl"
+    receipt = kernel.load_json(receipt_path)
+    expected = {"schema_version", "campaign_sha256", "case_id", "side", "pair_order", "category",
+                "requested_model", "requested_effort", "budget_id", "input_sha256",
+                "timeout_seconds", "max_pair_gap_seconds", "prompt_sha256", "source_commit",
+                "codex_version", "auth_surface", "observed_at", "provider_model_identity_verified",
+                "completed", "latency_ms", "input_tokens", "cached_input_tokens", "output_tokens",
+                "reasoning_output_tokens", "thread_id_sha256", "final_message_sha256",
+                "event_stream_sha256"}
+    if type(receipt) is not dict or set(receipt) != expected:
+        raise kernel.Rejected("invalid receipt schema")
+    campaign_sha256 = kernel.digest(campaign)
+    if (receipt["schema_version"] != RECEIPT_SCHEMA
+            or receipt["campaign_sha256"] != campaign_sha256
+            or receipt["case_id"] != case["id"] or receipt["side"] != side
+            or receipt["pair_order"] != _pair_order(case)
+            or receipt["category"] != case["category"]
+            or receipt["requested_model"] != campaign[side + "_model"]
+            or receipt["requested_effort"] != campaign["effort"]
+            or receipt["budget_id"] != campaign["budget_id"]
+            or receipt["timeout_seconds"] != campaign["timeout_seconds"]
+            or receipt["max_pair_gap_seconds"] != campaign["max_pair_gap_seconds"]
+            or receipt["input_sha256"] != case_input_sha(campaign, case)
+            or receipt["prompt_sha256"] != _sha_bytes(case["prompt"].encode())
+            or receipt["source_commit"] != campaign["source_commit"]
+            or receipt["auth_surface"] not in AUTH_SURFACES
+            or receipt["provider_model_identity_verified"] is not False
+            or receipt["completed"] is not True):
+        raise kernel.Rejected("receipt does not match campaign")
+    _validated_codex_version(receipt["codex_version"])
+    raw = raw_path.read_bytes()
+    completion, final_message = _completion_evidence(raw)
+    if _sha_bytes(raw) != receipt["event_stream_sha256"]:
+        raise kernel.Rejected("raw event evidence does not match receipt")
+    for field, value in completion.items():
+        if receipt[field] != value:
+            raise kernel.Rejected("receipt completion metrics do not match raw evidence")
+    receipt_sha256 = kernel.digest(receipt)
+    public_sample = {"sample_id": sample_id, "case_id": case["id"],
+                     "category": case["category"], "prompt": case["prompt"],
+                     "input_sha256": receipt["input_sha256"],
+                     "receipt_sha256": receipt_sha256,
+                     "event_stream_sha256": receipt["event_stream_sha256"],
+                     "final_message": final_message}
+    private_mapping = {"sample_id": sample_id, "case_id": case["id"], "side": side,
+                       "receipt_sha256": receipt_sha256,
+                       "event_stream_sha256": receipt["event_stream_sha256"]}
+    return public_sample, private_mapping
+
+
+def prepare_blind_grading(campaign_path: Path, evidence_dir: Path,
+                          manifest_path: Path, mapping_path: Path) -> dict[str, Any]:
+    """Create evaluator material and a separately held identity map.
+
+    The evaluator manifest intentionally excludes model, side, pair order, effort,
+    latency, usage, authentication surface and evidence paths. The mapping must not
+    be given to the evaluator.
+    """
+    if manifest_path == mapping_path or any(path.exists() or path.is_symlink()
+                                            for path in (manifest_path, mapping_path)):
+        raise kernel.Rejected("blind grading outputs must be new distinct files")
+    campaign = load_campaign(campaign_path)
+    used: set[str] = set()
+    public_samples: list[dict[str, Any]] = []
+    private_mappings: list[dict[str, Any]] = []
+    for case in campaign["cases"]:
+        for side in ("baseline", "candidate"):
+            sample_id = secrets.token_hex(32)
+            while sample_id in used:
+                sample_id = secrets.token_hex(32)
+            used.add(sample_id)
+            public, private = _blind_sample(campaign, case, side, evidence_dir, sample_id)
+            public_samples.append(public)
+            private_mappings.append(private)
+    public_samples.sort(key=lambda sample: sample["sample_id"])
+    private_mappings.sort(key=lambda sample: sample["sample_id"])
+    manifest = {"schema_version": BLIND_SCHEMA,
+                "campaign_sha256": kernel.digest(campaign), "samples": public_samples}
+    mapping = {"schema_version": BLIND_MAP_SCHEMA,
+               "campaign_sha256": kernel.digest(campaign),
+               "blind_manifest_sha256": kernel.digest(manifest), "samples": private_mappings}
+    # Store the identity map first. If the second write fails, the private map can
+    # be reconciled without exposing a partially generated evaluator manifest.
+    _write_private(mapping_path, mapping)
+    _write_private(manifest_path, manifest)
+    return {"schema_version": BLIND_SCHEMA, "campaign_sha256": kernel.digest(campaign),
+            "blind_manifest_sha256": kernel.digest(manifest),
+            "sample_count": len(public_samples), "manifest_path": str(manifest_path),
+            "mapping_path": str(mapping_path)}
+
+
+def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
+                   manifest_path: Path, mapping_path: Path) -> dict[str, Any]:
     campaign = load_campaign(campaign_path)
     grades = kernel.load_json(grades_path)
-    expected_grades = {"schema_version", "campaign_sha256", "grades"}
+    manifest = kernel.load_json(manifest_path)
+    mapping = kernel.load_json(mapping_path)
+    expected_manifest = {"schema_version", "campaign_sha256", "samples"}
+    if (type(manifest) is not dict or set(manifest) != expected_manifest
+            or manifest["schema_version"] != BLIND_SCHEMA
+            or manifest["campaign_sha256"] != kernel.digest(campaign)
+            or type(manifest["samples"]) is not list):
+        raise kernel.Rejected("invalid blind manifest")
+    manifest_map: dict[str, dict[str, Any]] = {}
+    required_public = {"sample_id", "case_id", "category", "prompt", "input_sha256",
+                       "receipt_sha256", "event_stream_sha256", "final_message"}
+    for sample in manifest["samples"]:
+        if (type(sample) is not dict or set(sample) != required_public
+                or type(sample["sample_id"]) is not str
+                or not kernel.SHA.fullmatch(sample["sample_id"])
+                or sample["sample_id"] in manifest_map):
+            raise kernel.Rejected("duplicate or invalid blind manifest")
+        manifest_map[sample["sample_id"]] = sample
+    expected_mapping = {"schema_version", "campaign_sha256", "blind_manifest_sha256", "samples"}
+    if (type(mapping) is not dict or set(mapping) != expected_mapping
+            or mapping["schema_version"] != BLIND_MAP_SCHEMA
+            or mapping["campaign_sha256"] != kernel.digest(campaign)
+            or mapping["blind_manifest_sha256"] != kernel.digest(manifest)
+            or type(mapping["samples"]) is not list):
+        raise kernel.Rejected("invalid blind mapping")
+    mapping_map: dict[tuple[str, str], dict[str, Any]] = {}
+    sample_ids: set[str] = set()
+    required_mapping = {"sample_id", "case_id", "side", "receipt_sha256", "event_stream_sha256"}
+    for sample in mapping["samples"]:
+        if type(sample) is not dict or set(sample) != required_mapping:
+            raise kernel.Rejected("invalid blind mapping")
+        key = (kernel.identifier(sample["case_id"]), sample["side"])
+        if (key in mapping_map or key[1] not in ("baseline", "candidate")
+                or type(sample["sample_id"]) is not str
+                or not kernel.SHA.fullmatch(sample["sample_id"])
+                or sample["sample_id"] in sample_ids):
+            raise kernel.Rejected("duplicate or invalid blind mapping")
+        for field in ("receipt_sha256", "event_stream_sha256"):
+            if type(sample[field]) is not str or not kernel.SHA.fullmatch(sample[field]):
+                raise kernel.Rejected("blind mapping is missing an evidence hash")
+        mapping_map[key] = sample
+        sample_ids.add(sample["sample_id"])
+    expected_grades = {"schema_version", "campaign_sha256", "blind_manifest_sha256", "grades"}
     if type(grades) is not dict or set(grades) != expected_grades or grades["schema_version"] != GRADE_SCHEMA:
         raise kernel.Rejected("invalid grades schema")
-    if grades["campaign_sha256"] != kernel.digest(campaign) or type(grades["grades"]) is not list:
+    if (grades["campaign_sha256"] != kernel.digest(campaign)
+            or grades["blind_manifest_sha256"] != mapping["blind_manifest_sha256"]
+            or type(grades["grades"]) is not list):
         raise kernel.Rejected("grades do not match campaign")
-    grade_map: dict[tuple[str, str], dict[str, Any]] = {}
-    required_grade = {"case_id", "side", "safety_pass", "correctness",
+    grade_map: dict[str, dict[str, Any]] = {}
+    required_grade = {"sample_id", "safety_pass", "correctness",
                       "evidence_coverage", "cost", "evaluator_ref",
                       "receipt_sha256", "event_stream_sha256"}
     for grade in grades["grades"]:
         if type(grade) is not dict or set(grade) != required_grade:
             raise kernel.Rejected("invalid grade")
-        key = (kernel.identifier(grade["case_id"]), grade["side"])
-        if key in grade_map or key[1] not in ("baseline", "candidate") or type(grade["safety_pass"]) is not bool:
+        key = grade["sample_id"]
+        if (type(key) is not str or not kernel.SHA.fullmatch(key) or key in grade_map
+                or key not in sample_ids or type(grade["safety_pass"]) is not bool):
             raise kernel.Rejected("duplicate or invalid grade")
         for metric in ("correctness", "evidence_coverage"):
             value = kernel.number(grade[metric])
@@ -653,10 +796,21 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
             for field, value in completion.items():
                 if receipt[field] != value:
                     raise kernel.Rejected("receipt completion metrics do not match raw evidence")
-            grade = grade_map.get((case["id"], side))
+            blind = mapping_map.get((case["id"], side))
+            if blind is None:
+                raise kernel.Rejected("missing blind mapping")
+            public = manifest_map.get(blind["sample_id"])
+            expected_public, expected_blind = _blind_sample(campaign, case, side,
+                                                            evidence_dir, blind["sample_id"])
+            if public != expected_public or blind != expected_blind:
+                raise kernel.Rejected("blind manifest or mapping does not match evidence")
+            if (blind["receipt_sha256"] != kernel.digest(receipt)
+                    or blind["event_stream_sha256"] != _sha_bytes(raw)):
+                raise kernel.Rejected("blind mapping is not bound to evidence")
+            grade = grade_map.get(blind["sample_id"])
             if grade is None:
                 raise kernel.Rejected("missing independent grade")
-            if (grade["receipt_sha256"] != kernel.digest(receipt)
+            if (grade["receipt_sha256"] != blind["receipt_sha256"]
                     or grade["event_stream_sha256"] != _sha_bytes(raw)):
                 raise kernel.Rejected("independent grade is not bound to evidence")
             pair[side] = {"model": receipt["requested_model"], "effort": receipt["requested_effort"],
@@ -675,11 +829,17 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path) -
         pairs.append(pair)
     if len(grade_map) != len(pairs) * 2:
         raise kernel.Rejected("grades contain cases outside campaign")
+    if len(mapping_map) != len(pairs) * 2:
+        raise kernel.Rejected("blind mapping contains cases outside campaign")
+    if len(manifest_map) != len(pairs) * 2:
+        raise kernel.Rejected("blind manifest contains cases outside campaign")
     report = {"baseline_model": campaign["baseline_model"],
               "candidate_model": campaign["candidate_model"], "pairs": pairs}
     return {"report": report, "gate": kernel.migration_gate(report),
             "comparison_conditions": {"codex_version": campaign_codex_version,
                                        "auth_surface": campaign_auth_surface,
+                                       "blind_manifest_sha256": mapping["blind_manifest_sha256"],
+                                       "independent_grading_blinded": True,
                                        "timeout_seconds": campaign["timeout_seconds"],
                                        "max_pair_gap_seconds": campaign["max_pair_gap_seconds"],
                                        "max_observed_pair_gap_seconds": max_observed_pair_gap_seconds,
@@ -706,10 +866,17 @@ def main() -> int:
     collect_cmd.add_argument("--evidence-dir", type=Path, default=ROOT / "runtime/gpt6-evaluation")
     collect_cmd.add_argument("--timeout-seconds", type=int,
                              help="must match the campaign value; omitted uses the campaign")
+    blind_cmd = sub.add_parser("prepare-grading")
+    blind_cmd.add_argument("--campaign", type=Path, required=True)
+    blind_cmd.add_argument("--evidence-dir", type=Path, required=True)
+    blind_cmd.add_argument("--output", type=Path, required=True)
+    blind_cmd.add_argument("--mapping-output", type=Path, required=True)
     compile_cmd = sub.add_parser("compile")
     compile_cmd.add_argument("--campaign", type=Path, required=True)
     compile_cmd.add_argument("--evidence-dir", type=Path, required=True)
     compile_cmd.add_argument("--grades", type=Path, required=True)
+    compile_cmd.add_argument("--blind-manifest", type=Path, required=True)
+    compile_cmd.add_argument("--blind-map", type=Path, required=True)
     args = parser.parse_args()
     try:
         if args.command == "validate-campaign":
@@ -725,8 +892,12 @@ def main() -> int:
         elif args.command == "collect":
             output = collect(args.campaign, args.case_id, args.side, args.workspace,
                              args.evidence_dir, args.timeout_seconds)
+        elif args.command == "prepare-grading":
+            output = prepare_blind_grading(args.campaign, args.evidence_dir,
+                                           args.output, args.mapping_output)
         else:
-            output = compile_report(args.campaign, args.evidence_dir, args.grades)
+            output = compile_report(args.campaign, args.evidence_dir, args.grades,
+                                    args.blind_manifest, args.blind_map)
         print(kernel.canonical(output).decode())
         return 0
     except CodexRunBlocked as exc:

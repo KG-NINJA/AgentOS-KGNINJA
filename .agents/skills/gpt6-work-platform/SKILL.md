@@ -71,6 +71,14 @@ hash that was reviewed. Re-derive completion and token fields from the raw JSONL
 before aggregation; an evaluator reference without those evidence hashes is not a
 grade of the stored run.
 
+Blind the independent evaluator to model identity, baseline/candidate side and
+execution order. Give the evaluator only randomly identified private grading
+samples containing the shared case context, final response and evidence hashes;
+hold the sample-to-side map separately for compilation. Bind the returned grades
+to the exact blind-manifest hash. Balanced execution order is not evaluator
+blinding, and a deterministic sample identifier derived from public case/model
+fields is reversible rather than blind.
+
 Do not batch all baseline observations long before all candidate observations.
 Reject pairs outside the fixed observation gap and reject unbalanced execution
 order so provider load, time drift or cache order cannot be silently presented as
