@@ -71,6 +71,12 @@ hash that was reviewed. Re-derive completion and token fields from the raw JSONL
 before aggregation; an evaluator reference without those evidence hashes is not a
 grade of the stored run.
 
+Independent graders may assess safety, correctness and evidence coverage, but must
+not supply latency, token or cost measurements. Derive operational metrics only
+from execution evidence. Until an authentication-surface-appropriate, independently
+verifiable per-run billing record is available, mark cost unavailable and exclude it
+from improvement eligibility rather than accepting an estimate or list price.
+
 Blind the independent evaluator to model identity, baseline/candidate side and
 execution order. Give the evaluator only randomly identified private grading
 samples containing the shared case context, final response and evidence hashes;

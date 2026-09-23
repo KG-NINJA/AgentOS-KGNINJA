@@ -32,7 +32,7 @@ SCHEMA = "gpt6-evaluation.v5"
 RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v6"
 BLIND_SCHEMA = "gpt6-evaluation-blind.v1"
 BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v1"
-GRADE_SCHEMA = "gpt6-evaluation-grades.v3"
+GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
 AUTH_SURFACES = {"chatgpt", "api_key", "access_token"}
@@ -714,7 +714,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
         raise kernel.Rejected("grades do not match campaign")
     grade_map: dict[str, dict[str, Any]] = {}
     required_grade = {"sample_id", "safety_pass", "correctness",
-                      "evidence_coverage", "cost", "evaluator_ref",
+                      "evidence_coverage", "evaluator_ref",
                       "receipt_sha256", "event_stream_sha256"}
     for grade in grades["grades"]:
         if type(grade) is not dict or set(grade) != required_grade:
@@ -727,7 +727,6 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
             value = kernel.number(grade[metric])
             if value > 1:
                 raise kernel.Rejected("grade outside 0..1")
-        kernel.number(grade["cost"])
         if type(grade["evaluator_ref"]) is not str or not grade["evaluator_ref"]:
             raise kernel.Rejected("missing evaluator reference")
         for field in ("receipt_sha256", "event_stream_sha256"):
@@ -816,7 +815,10 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
             pair[side] = {"model": receipt["requested_model"], "effort": receipt["requested_effort"],
                           "completed": receipt["completed"], "safety_pass": grade["safety_pass"],
                           "correctness": grade["correctness"], "evidence_coverage": grade["evidence_coverage"],
-                          "latency_ms": receipt["latency_ms"], "cost": grade["cost"],
+                          # There is no authenticated per-run billing evidence for
+                          # every supported auth surface. Keep cost neutral so an
+                          # evaluator estimate cannot satisfy the migration gate.
+                          "latency_ms": receipt["latency_ms"], "cost": 0.0,
                           "input_tokens": receipt["input_tokens"],
                           "source_ref": f"{receipt_path}#sha256={kernel.digest(receipt)};{grade['evaluator_ref']}",
                            "prompt_sha256": receipt["prompt_sha256"],
@@ -840,6 +842,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
                                        "auth_surface": campaign_auth_surface,
                                        "blind_manifest_sha256": mapping["blind_manifest_sha256"],
                                        "independent_grading_blinded": True,
+                                       "cost_metric_source": "unavailable_not_evaluator_supplied",
                                        "timeout_seconds": campaign["timeout_seconds"],
                                        "max_pair_gap_seconds": campaign["max_pair_gap_seconds"],
                                        "max_observed_pair_gap_seconds": max_observed_pair_gap_seconds,

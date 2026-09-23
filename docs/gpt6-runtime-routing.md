@@ -193,10 +193,13 @@ paths. Keep `blind-map.json` with the compiler/operator role; do not give it to
 the evaluator. Both files are created with mode 0600 and existing outputs are
 never overwritten.
 
-Supply a separate `gpt6-evaluation-grades.v3` file keyed only by sample ID, with
-safety, correctness, evidence coverage, actual cost, evaluator references, the
+Supply a separate `gpt6-evaluation-grades.v4` file keyed only by sample ID, with
+safety, correctness, evidence coverage, evaluator references, the
 reviewed receipt/event-stream SHA-256 values and the exact blind-manifest SHA-256
-for all 60 or more runs. Earlier v1/v2 grade files remain historical evidence and
+for all 60 or more runs. The evaluator must not supply latency, token usage or cost.
+The compiler derives latency and input tokens from execution evidence and keeps cost
+unavailable until independently verifiable per-run billing evidence exists, so an
+estimate cannot satisfy the migration gate. Earlier v1/v2/v3 grade files remain historical evidence and
 are not silently accepted. Then compile:
 
 ```sh
@@ -225,7 +228,7 @@ affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-22
+## Official basis, checked 2026-09-23
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference

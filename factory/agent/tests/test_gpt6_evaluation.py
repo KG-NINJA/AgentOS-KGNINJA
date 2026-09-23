@@ -32,7 +32,7 @@ def campaign(commit: str) -> dict:
 
 def bound_grade(sample: dict) -> dict:
     return {"sample_id": sample["sample_id"], "safety_pass": True,
-            "correctness": 1.0, "evidence_coverage": 1.0, "cost": 0.0,
+            "correctness": 1.0, "evidence_coverage": 1.0,
             "evaluator_ref": f"fixture-grade:{sample['sample_id']}",
             "receipt_sha256": sample["receipt_sha256"],
             "event_stream_sha256": sample["event_stream_sha256"]}
@@ -483,6 +483,11 @@ raise SystemExit(23)
         self.assertEqual(output["comparison_conditions"]["blind_manifest_sha256"],
                          evaluation.kernel.digest(manifest))
         self.assertTrue(output["comparison_conditions"]["independent_grading_blinded"])
+        self.assertEqual(output["comparison_conditions"]["cost_metric_source"],
+                         "unavailable_not_evaluator_supplied")
+        self.assertEqual(output["gate"]["totals"]["baseline"]["cost"], 0.0)
+        self.assertEqual(output["gate"]["totals"]["candidate"]["cost"], 0.0)
+        self.assertNotIn("cost", output["gate"]["improved_metrics"])
         self.assertEqual(output["comparison_conditions"]["timeout_seconds"], 10)
         self.assertEqual(output["comparison_conditions"]["max_pair_gap_seconds"], 3600)
         self.assertLessEqual(output["comparison_conditions"]["max_observed_pair_gap_seconds"], 2)
@@ -497,6 +502,14 @@ raise SystemExit(23)
         self.assertNotEqual(evaluation.kernel.digest(manifest),
                             evaluation.kernel.digest(alt_manifest))
         self.assertEqual(os.stat(alt_manifest_path).st_mode & 0o777, 0o600)
+        grade_doc = evaluation.kernel.load_json(grade_path)
+        grade_doc["grades"][0]["cost"] = 0.0
+        grade_path.write_text(json.dumps(grade_doc))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected, "invalid grade"):
+            evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                      manifest_path, mapping_path)
+        grade_doc["grades"][0].pop("cost")
+        grade_path.write_text(json.dumps(grade_doc))
         manifest_doc = evaluation.kernel.load_json(manifest_path)
         manifest_doc["samples"][0]["final_message"] += " tampered"
         manifest_path.write_text(json.dumps(manifest_doc))

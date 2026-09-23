@@ -84,7 +84,9 @@ checked independently, then freeze at least 30 distinct completed paired tasks
 across research, coding, files, tool routing and safety. Match data/tools/budgets,
 execution timeouts, effective effort and a campaign-fixed maximum observation gap
 for every baseline/candidate pair; record source receipts, prompt/input hashes,
-safety, correctness, evidence coverage, latency, input tokens and cost.
+safety, correctness, evidence coverage, latency and input tokens. Record cost only
+from independently verifiable, authentication-surface-appropriate per-run billing
+evidence; otherwise mark it unavailable and exclude it from improvement eligibility.
 Counterbalance baseline-first and candidate-first cases (counts may differ by at
 most one), and complete the campaign-selected first side before its mate starts.
 The order must match the deterministic schedule derived from the frozen source
@@ -95,8 +97,9 @@ JSONL and rejects evidence changed after grading.
 Generate a private blind manifest with random sample IDs before grading. It may
 contain case context, final response and evidence hashes, but not model, side,
 pair order, effort, timing, usage, authentication surface or evidence paths. Keep
-the separately generated identity map away from the evaluator. Grade schema v3
-uses only sample IDs and binds the grade set to the blind-manifest hash; compilation
+the separately generated identity map away from the evaluator. Grade schema v4
+uses only sample IDs and binds the grade set to the blind-manifest hash. It does not
+accept evaluator-supplied operational cost; compilation
 receives the private map and rejects substituted, duplicated or stale evidence.
 
 The offline gate requires no per-case quality regression or safety failure and
