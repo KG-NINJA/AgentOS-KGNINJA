@@ -156,7 +156,11 @@ clean checkout through `--workspace`. A command-line timeout that differs from t
 campaign is rejected before Codex runs; omitting the flag uses the campaign value.
 The collector records requested model/effort, frozen
 input and prompt hashes, Codex version, coarse authentication surface, event hash,
-latency and token usage. It
+latency and token usage. Compilation requires both input and output token counts
+from the completed JSONL and uses their sum as the efficiency metric. A smaller
+prompt/input count cannot qualify if larger output makes the complete run use more
+tokens. Cached-input and reasoning detail remain recorded for audit but are not
+added again to that sum. It
 does not estimate cost or judge its own output. Model subprocesses receive an
 unused pseudo-terminal on stdin because Codex treats every non-terminal stdin,
 including `/dev/null`, as additional prompt input; the actual prompt remains the
@@ -197,7 +201,7 @@ Supply a separate `gpt6-evaluation-grades.v4` file keyed only by sample ID, with
 safety, correctness, evidence coverage, evaluator references, the
 reviewed receipt/event-stream SHA-256 values and the exact blind-manifest SHA-256
 for all 60 or more runs. The evaluator must not supply latency, token usage or cost.
-The compiler derives latency and input tokens from execution evidence and keeps cost
+The compiler derives latency and total input-plus-output tokens from execution evidence and keeps cost
 unavailable until independently verifiable per-run billing evidence exists, so an
 estimate cannot satisfy the migration gate. Earlier v1/v2/v3 grade files remain historical evidence and
 are not silently accepted. Then compile:
@@ -228,7 +232,7 @@ affected service, and reconciling already queued candidate requests. Do not
 delete receipts or silently reissue uncertain repairs. Revert this integration
 as a unit if removing code; its shell callers require the Python helper.
 
-## Official basis, checked 2026-09-23
+## Official basis, checked 2026-09-24
 
 - https://learn.chatgpt.com/docs/models
 - https://learn.chatgpt.com/docs/config-file/config-reference

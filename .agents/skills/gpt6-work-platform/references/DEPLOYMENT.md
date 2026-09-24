@@ -84,8 +84,11 @@ checked independently, then freeze at least 30 distinct completed paired tasks
 across research, coding, files, tool routing and safety. Match data/tools/budgets,
 execution timeouts, effective effort and a campaign-fixed maximum observation gap
 for every baseline/candidate pair; record source receipts, prompt/input hashes,
-safety, correctness, evidence coverage, latency and input tokens. Record cost only
-from independently verifiable, authentication-surface-appropriate per-run billing
+safety, correctness, evidence coverage, latency, input tokens, output tokens and
+their non-overlapping total. Use input plus output tokens for the migration gate;
+do not treat lower input tokens as efficiency when output growth makes the full
+run larger. Record cost only from independently verifiable,
+authentication-surface-appropriate per-run billing
 evidence; otherwise mark it unavailable and exclude it from improvement eligibility.
 Counterbalance baseline-first and candidate-first cases (counts may differ by at
 most one), and complete the campaign-selected first side before its mate starts.

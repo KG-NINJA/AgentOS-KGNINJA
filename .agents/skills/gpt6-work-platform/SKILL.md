@@ -73,7 +73,9 @@ grade of the stored run.
 
 Independent graders may assess safety, correctness and evidence coverage, but must
 not supply latency, token or cost measurements. Derive operational metrics only
-from execution evidence. Until an authentication-surface-appropriate, independently
+from execution evidence. Count input plus output tokens for migration efficiency;
+an input-token reduction alone is not an improvement if output growth raises total
+token volume. Until an authentication-surface-appropriate, independently
 verifiable per-run billing record is available, mark cost unavailable and exclude it
 from improvement eligibility rather than accepting an estimate or list price.
 

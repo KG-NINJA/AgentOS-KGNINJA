@@ -334,7 +334,7 @@ def _completion_evidence(raw: bytes) -> tuple[dict[str, Any], str]:
     for name in ("input_tokens", "cached_input_tokens", "output_tokens",
                  "reasoning_output_tokens"):
         value = usage.get(name)
-        if name == "input_tokens":
+        if name in ("input_tokens", "output_tokens"):
             if type(value) is not int or value < 0:
                 raise kernel.Rejected("Codex completion is missing usage")
         elif value is not None and (type(value) is not int or value < 0):
@@ -820,6 +820,8 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
                           # evaluator estimate cannot satisfy the migration gate.
                           "latency_ms": receipt["latency_ms"], "cost": 0.0,
                           "input_tokens": receipt["input_tokens"],
+                          "output_tokens": receipt["output_tokens"],
+                          "total_tokens": receipt["input_tokens"] + receipt["output_tokens"],
                           "source_ref": f"{receipt_path}#sha256={kernel.digest(receipt)};{grade['evaluator_ref']}",
                            "prompt_sha256": receipt["prompt_sha256"],
                            "input_sha256": receipt["input_sha256"], "budget_id": receipt["budget_id"]}
@@ -843,6 +845,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
                                        "blind_manifest_sha256": mapping["blind_manifest_sha256"],
                                        "independent_grading_blinded": True,
                                        "cost_metric_source": "unavailable_not_evaluator_supplied",
+                                       "token_metric_source": "event_input_plus_output_tokens",
                                        "timeout_seconds": campaign["timeout_seconds"],
                                        "max_pair_gap_seconds": campaign["max_pair_gap_seconds"],
                                        "max_observed_pair_gap_seconds": max_observed_pair_gap_seconds,

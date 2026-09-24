@@ -488,6 +488,11 @@ raise SystemExit(23)
         self.assertEqual(output["gate"]["totals"]["baseline"]["cost"], 0.0)
         self.assertEqual(output["gate"]["totals"]["candidate"]["cost"], 0.0)
         self.assertNotIn("cost", output["gate"]["improved_metrics"])
+        self.assertEqual(output["gate"]["totals"]["baseline"]["total_tokens"], 3150.0)
+        self.assertEqual(output["gate"]["totals"]["candidate"]["total_tokens"], 3150.0)
+        self.assertNotIn("input_tokens", output["gate"]["totals"]["baseline"])
+        self.assertEqual(output["comparison_conditions"]["token_metric_source"],
+                         "event_input_plus_output_tokens")
         self.assertEqual(output["comparison_conditions"]["timeout_seconds"], 10)
         self.assertEqual(output["comparison_conditions"]["max_pair_gap_seconds"], 3600)
         self.assertLessEqual(output["comparison_conditions"]["max_observed_pair_gap_seconds"], 2)
@@ -615,6 +620,16 @@ raise SystemExit(23)
     def test_malformed_event_stream_is_rejected(self):
         with self.assertRaises(evaluation.kernel.Rejected):
             evaluation._parse_events(b'{"type":"thread.started","thread_id":"x"}\n')
+
+    def test_completion_requires_output_token_usage(self):
+        events = b"\n".join((
+            b'{"type":"thread.started","thread_id":"thread"}',
+            b'{"type":"item.completed","item":{"type":"agent_message","text":"done"}}',
+            b'{"type":"turn.completed","usage":{"input_tokens":1}}',
+        )) + b"\n"
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "completion is missing usage"):
+            evaluation._completion_evidence(events)
 
 
 if __name__ == "__main__":

@@ -39,7 +39,8 @@ def report():
             pair[side] = {"model": model, "effort": "high", "completed": True,
                           "safety_pass": True, "correctness": 1.0, "evidence_coverage": 1.0,
                           "latency_ms": 100 if side == "baseline" else 80,
-                          "cost": 1, "input_tokens": 1000, "source_ref": f"fixture:{i}:{side}",
+                          "cost": 1, "input_tokens": 1000, "output_tokens": 100,
+                          "total_tokens": 1100, "source_ref": f"fixture:{i}:{side}",
                           "prompt_sha256": "1" * 64, "input_sha256": sha, "budget_id": "fixture-budget"}
         out["pairs"].append(pair)
     return out
@@ -477,6 +478,23 @@ class MigrationTests(unittest.TestCase):
         for row in value["pairs"]:
             row["candidate"]["latency_ms"] = 100
         self.assertFalse(k.migration_gate(value)["eligible_for_operator_review"])
+
+    def test_input_reduction_cannot_hide_output_growth(self):
+        value = report()
+        for row in value["pairs"]:
+            row["candidate"]["latency_ms"] = 100
+            row["candidate"]["input_tokens"] = 900
+            row["candidate"]["output_tokens"] = 1000
+            row["candidate"]["total_tokens"] = 1900
+        out = k.migration_gate(value)
+        self.assertFalse(out["eligible_for_operator_review"])
+        self.assertNotIn("input_tokens", out["improved_metrics"])
+
+    def test_total_tokens_must_match_components(self):
+        value = report()
+        value["pairs"][0]["candidate"]["total_tokens"] += 1
+        with self.assertRaisesRegex(k.Rejected, "invalid token metrics"):
+            k.migration_gate(value)
 
     def test_deterministic_route(self):
         self.assertFalse(k.route_intent("arithmetic", {})["model_call"])
