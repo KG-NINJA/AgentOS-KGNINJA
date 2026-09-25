@@ -29,7 +29,7 @@ from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
                            IncompatibleCodexCli, require_gpt6_cli)  # noqa: E402
 
 SCHEMA = "gpt6-evaluation.v5"
-RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v6"
+RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v7"
 BLIND_SCHEMA = "gpt6-evaluation-blind.v1"
 BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v1"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
@@ -328,7 +328,8 @@ def _completion_evidence(raw: bytes) -> tuple[dict[str, Any], str]:
                 if event.get("type") == "item.completed"
                 and type(event.get("item")) is dict
                 and event["item"].get("type") == "agent_message"]
-    if not messages or type(messages[-1]) is not str:
+    if (not messages or type(messages[-1]) is not str
+            or not messages[-1].strip()):
         raise kernel.Rejected("Codex completion is missing final agent message")
     tokens: dict[str, int | None] = {}
     for name in ("input_tokens", "cached_input_tokens", "output_tokens",

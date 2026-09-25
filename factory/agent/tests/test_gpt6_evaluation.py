@@ -154,6 +154,22 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
         self.assertEqual(result["auth_surface"], "chatgpt")
         self.assertFalse(result["provider_model_identity_verified"])
 
+    def test_empty_final_agent_message_is_not_completion_evidence(self):
+        for message in ("", "  \n\t"):
+            with self.subTest(message=repr(message)):
+                raw = b"\n".join((
+                    json.dumps({"type": "thread.started", "thread_id": "test-thread"}).encode(),
+                    json.dumps({"type": "turn.started"}).encode(),
+                    json.dumps({"type": "item.completed", "item": {
+                        "type": "agent_message", "text": message}}).encode(),
+                    json.dumps({"type": "turn.completed", "usage": {
+                        "input_tokens": 100, "cached_input_tokens": 0,
+                        "output_tokens": 0, "reasoning_output_tokens": 1}}).encode(),
+                )) + b"\n"
+                with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                            "missing final agent message"):
+                    evaluation._completion_evidence(raw)
+
     def test_auth_surface_classifier_never_returns_status_payload(self):
         secret = b"Logged in as private@example.invalid with token sk-private"
         completed = subprocess.CompletedProcess([], 0, secret, b"")
