@@ -426,7 +426,7 @@ def migration_gate(report: dict) -> dict:
     if type(pairs) is not list or not 30 <= len(pairs) <= 1000:
         raise Rejected("need 30..1000 completed paired cases")
     ids, inputs, categories, reasons = set(), set(), set(), []
-    totals = {side: {m: 0.0 for m in ("latency_ms", "cost", "input_tokens")} for side in ("baseline", "candidate")}
+    totals = {side: {m: 0.0 for m in ("latency_ms", "cost", "total_tokens")} for side in ("baseline", "candidate")}
     for pair in pairs:
         if type(pair) is not dict or set(pair) != {"id", "input_sha256", "category", "budget_id", "baseline", "candidate"}:
             raise Rejected("invalid pair schema")
@@ -440,7 +440,7 @@ def migration_gate(report: dict) -> dict:
         identifier(pair["budget_id"])
         for side, model in (("baseline", baseline), ("candidate", candidate)):
             row = pair[side]
-            required = {"model", "effort", "completed", "safety_pass", "correctness", "evidence_coverage", "latency_ms", "cost", "input_tokens", "source_ref", "prompt_sha256", "input_sha256", "budget_id"}
+            required = {"model", "effort", "completed", "safety_pass", "correctness", "evidence_coverage", "latency_ms", "cost", "input_tokens", "output_tokens", "total_tokens", "source_ref", "prompt_sha256", "input_sha256", "budget_id"}
             if type(row) is not dict or set(row) != required:
                 raise Rejected("invalid paired result")
             if row["model"] != model or row["input_sha256"] != sha or row["budget_id"] != pair["budget_id"]:
@@ -456,6 +456,11 @@ def migration_gate(report: dict) -> dict:
             for metric in ("correctness", "evidence_coverage"):
                 if number(row[metric]) > 1:
                     raise Rejected("quality score outside 0..1")
+            if (type(row["input_tokens"]) is not int or row["input_tokens"] < 0
+                    or type(row["output_tokens"]) is not int or row["output_tokens"] < 0
+                    or type(row["total_tokens"]) is not int
+                    or row["total_tokens"] != row["input_tokens"] + row["output_tokens"]):
+                raise Rejected("invalid token metrics")
             for metric in totals[side]:
                 totals[side][metric] += number(row[metric])
         if pair["baseline"]["effort"] != pair["candidate"]["effort"]:

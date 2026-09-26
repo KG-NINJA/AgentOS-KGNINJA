@@ -51,10 +51,49 @@ runtime solely on a model release or this policy. Start migration at the baselin
 reasoning effort. Candidate task-specific efforts are tested separately.
 
 Use `scripts/work_kernel.py evaluate` on at least 30 distinct completed paired
-cases with matched inputs and budgets, covering research, coding, files, tool
-routing and safety. Require no per-case correctness/evidence regression or safety
-failure and at least 10% improvement in one measured operating metric. This is a
-local migration criterion, not an OpenAI requirement or financial backtest gate.
+cases with matched inputs, budgets, execution deadlines and a campaign-fixed
+maximum observation gap between each baseline/candidate pair, covering research,
+coding, files, tool routing and safety. Require no per-case correctness/evidence
+regression or safety failure and at least 10% improvement in one measured
+operating metric. This is a local migration criterion, not an OpenAI requirement
+or financial backtest gate.
+
+Counterbalance which model runs first across the campaign. The baseline-first and
+candidate-first counts may differ by at most one, and the selected first side must
+complete before its mate starts. Do not let a fixed order or warm-cache effect be
+silently attributed to the candidate model.
+Derive that order deterministically from the frozen source commit, case identifiers
+and prompt hashes. A balanced but manually selected order is not an equivalent
+campaign because it can assign favorable order to chosen cases after inspection.
+
+Bind every independent grade to the exact execution receipt and raw event-stream
+hash that was reviewed. Re-derive completion and token fields from the raw JSONL
+before aggregation; an evaluator reference without those evidence hashes is not a
+grade of the stored run. A completed event is not sufficient by itself: require one
+ordered lifecycle of `thread.started`, `turn.started`, a non-whitespace final agent
+message and `turn.completed` before a run can become success evidence or an
+independent grading sample. Reject messages outside that turn lifecycle.
+
+Independent graders may assess safety, correctness and evidence coverage, but must
+not supply latency, token or cost measurements. Derive operational metrics only
+from execution evidence. Count input plus output tokens for migration efficiency;
+an input-token reduction alone is not an improvement if output growth raises total
+token volume. Until an authentication-surface-appropriate, independently
+verifiable per-run billing record is available, mark cost unavailable and exclude it
+from improvement eligibility rather than accepting an estimate or list price.
+
+Blind the independent evaluator to model identity, baseline/candidate side and
+execution order. Give the evaluator only randomly identified private grading
+samples containing the shared case context, final response and evidence hashes;
+hold the sample-to-side map separately for compilation. Bind the returned grades
+to the exact blind-manifest hash. Balanced execution order is not evaluator
+blinding, and a deterministic sample identifier derived from public case/model
+fields is reversible rather than blind.
+
+Do not batch all baseline observations long before all candidate observations.
+Reject pairs outside the fixed observation gap and reject unbalanced execution
+order so provider load, time drift or cache order cannot be silently presented as
+a model-only difference.
 
 Passing supplied JSON only establishes structural eligibility for operator review.
 It does not authenticate model IDs, prove capability, install a skill or authorize
