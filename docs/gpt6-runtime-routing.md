@@ -172,12 +172,15 @@ under `blocked/`, so an explicit retry cannot erase the earlier diagnosis.
 The checkout is verified again after the model process completes. If its commit or
 contents changed during execution, no success receipt is written and the claim
 remains unresolved for explicit operator reconciliation.
-Receipt schema v7 additionally requires a non-whitespace final agent message before
-a completed Codex event can become success evidence or enter blind grading. Retain
-v6 receipts as historical evidence instead of silently accepting an empty response.
+Receipt schema v8 requires exactly one ordered `thread.started`, `turn.started` and
+`turn.completed` lifecycle, a non-whitespace thread ID and a non-whitespace final
+agent message inside that turn before a Codex event stream can become success
+evidence or enter blind grading. Messages before the turn or after completion are
+rejected. Retain v7 receipts as historical evidence instead of silently accepting
+malformed event order.
 Receipt schema v6 binds the deterministic campaign order to the prior
 authentication, timeout and observation-gap conditions. Retain v1/v2/v3/v4
-and v5 receipts as historical evidence rather than rewriting or mixing them into a v7
+and v5 receipts as historical evidence rather than rewriting or mixing them into a v8
 campaign. Compilation
 parses both UTC observation times, rejects pairs outside the frozen gap and reports
 the largest observed gap plus baseline-first and candidate-first counts. This

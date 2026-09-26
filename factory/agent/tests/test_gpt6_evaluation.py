@@ -430,6 +430,7 @@ raise SystemExit(23)
     def test_completion_without_thread_id_is_blocked(self):
         events = b"\n".join((
             b'{"type":"thread.started"}',
+            b'{"type":"turn.started"}',
             b'{"type":"item.completed","item":{"type":"agent_message","text":"private"}}',
             b'{"type":"turn.completed","usage":{"input_tokens":1}}',
         )) + b"\n"
@@ -640,11 +641,39 @@ raise SystemExit(23)
     def test_completion_requires_output_token_usage(self):
         events = b"\n".join((
             b'{"type":"thread.started","thread_id":"thread"}',
+            b'{"type":"turn.started"}',
             b'{"type":"item.completed","item":{"type":"agent_message","text":"done"}}',
             b'{"type":"turn.completed","usage":{"input_tokens":1}}',
         )) + b"\n"
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "completion is missing usage"):
+            evaluation._completion_evidence(events)
+
+    def test_completion_requires_ordered_event_lifecycle(self):
+        valid = (
+            b'{"type":"thread.started","thread_id":"thread"}',
+            b'{"type":"turn.started"}',
+            b'{"type":"item.completed","item":{"type":"agent_message","text":"done"}}',
+            b'{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}',
+        )
+        malformed = (
+            valid[:1] + valid[2:],
+            (valid[0], valid[1], valid[3], valid[2]),
+            (valid[1], valid[0], valid[2], valid[3]),
+        )
+        for events in malformed:
+            with self.subTest(events=events), self.assertRaises(evaluation.kernel.Rejected):
+                evaluation._completion_evidence(b"\n".join(events) + b"\n")
+
+    def test_completion_rejects_whitespace_thread_id(self):
+        events = b"\n".join((
+            b'{"type":"thread.started","thread_id":"  "}',
+            b'{"type":"turn.started"}',
+            b'{"type":"item.completed","item":{"type":"agent_message","text":"done"}}',
+            b'{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}',
+        )) + b"\n"
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "completion is missing thread id"):
             evaluation._completion_evidence(events)
 
 

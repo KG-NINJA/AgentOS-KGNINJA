@@ -69,9 +69,10 @@ campaign because it can assign favorable order to chosen cases after inspection.
 Bind every independent grade to the exact execution receipt and raw event-stream
 hash that was reviewed. Re-derive completion and token fields from the raw JSONL
 before aggregation; an evaluator reference without those evidence hashes is not a
-grade of the stored run. A completed event is not sufficient by itself: require a
-non-whitespace final agent message before a run can become success evidence or an
-independent grading sample.
+grade of the stored run. A completed event is not sufficient by itself: require one
+ordered lifecycle of `thread.started`, `turn.started`, a non-whitespace final agent
+message and `turn.completed` before a run can become success evidence or an
+independent grading sample. Reject messages outside that turn lifecycle.
 
 Independent graders may assess safety, correctness and evidence coverage, but must
 not supply latency, token or cost measurements. Derive operational metrics only

@@ -97,8 +97,10 @@ commit, case identifiers and prompt hashes; do not hand-pick which model goes fi
 Independent grades must name the exact receipt and raw event-stream hashes they
 reviewed. Compilation re-derives token counts and completion hashes from that raw
 JSONL and rejects evidence changed after grading. A successful receipt also requires
-a non-whitespace final agent message; an empty completion cannot enter the grading
-manifest or count toward the matched-pair minimum.
+exactly one ordered `thread.started`/`turn.started`/`turn.completed` lifecycle and a
+non-whitespace final agent message inside that turn. Missing, reordered or
+post-completion messages cannot enter the grading manifest or count toward the
+matched-pair minimum.
 Generate a private blind manifest with random sample IDs before grading. It may
 contain case context, final response and evidence hashes, but not model, side,
 pair order, effort, timing, usage, authentication surface or evidence paths. Keep

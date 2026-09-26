@@ -29,7 +29,7 @@ from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
                            IncompatibleCodexCli, require_gpt6_cli)  # noqa: E402
 
 SCHEMA = "gpt6-evaluation.v5"
-RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v7"
+RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v8"
 BLIND_SCHEMA = "gpt6-evaluation-blind.v1"
 BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v1"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
@@ -306,12 +306,20 @@ def _parse_events(raw: bytes) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         if type(event) is not dict or type(event.get("type")) is not str:
             raise kernel.Rejected("invalid Codex JSONL event")
         events.append(event)
-    completed = [event for event in events if event.get("type") == "turn.completed"]
+    completed = [(index, event) for index, event in enumerate(events)
+                 if event.get("type") == "turn.completed"]
     failed = [event for event in events if event.get("type") in ("turn.failed", "error")]
-    started = [event for event in events if event.get("type") == "thread.started"]
-    if len(completed) != 1 or len(started) != 1 or failed:
+    threads = [index for index, event in enumerate(events)
+               if event.get("type") == "thread.started"]
+    turns = [index for index, event in enumerate(events)
+             if event.get("type") == "turn.started"]
+    if (len(completed) != 1 or len(threads) != 1 or len(turns) != 1
+            or failed):
         raise kernel.Rejected("Codex turn did not complete cleanly")
-    usage = completed[0].get("usage")
+    completed_index, completed_event = completed[0]
+    if not threads[0] < turns[0] < completed_index:
+        raise kernel.Rejected("Codex event lifecycle is invalid")
+    usage = completed_event.get("usage")
     if type(usage) is not dict or type(usage.get("input_tokens")) is not int or usage["input_tokens"] < 0:
         raise kernel.Rejected("Codex completion is missing usage")
     return events, usage
@@ -322,15 +330,24 @@ def _completion_evidence(raw: bytes) -> tuple[dict[str, Any], str]:
     events, usage = _parse_events(raw)
     thread = next(event for event in events if event["type"] == "thread.started")
     thread_id = thread.get("thread_id")
-    if type(thread_id) is not str or not thread_id:
+    if type(thread_id) is not str or not thread_id.strip():
         raise kernel.Rejected("Codex completion is missing thread id")
-    messages = [event.get("item", {}).get("text") for event in events
+    turn_started_index = next(index for index, event in enumerate(events)
+                              if event["type"] == "turn.started")
+    turn_completed_index = next(index for index, event in enumerate(events)
+                                if event["type"] == "turn.completed")
+    messages = [(index, event.get("item", {}).get("text"))
+                for index, event in enumerate(events)
                 if event.get("type") == "item.completed"
                 and type(event.get("item")) is dict
                 and event["item"].get("type") == "agent_message"]
-    if (not messages or type(messages[-1]) is not str
-            or not messages[-1].strip()):
+    if any(not turn_started_index < index < turn_completed_index
+           for index, _ in messages):
+        raise kernel.Rejected("Codex agent message is outside turn lifecycle")
+    if (not messages or type(messages[-1][1]) is not str
+            or not messages[-1][1].strip()):
         raise kernel.Rejected("Codex completion is missing final agent message")
+    final_message = messages[-1][1]
     tokens: dict[str, int | None] = {}
     for name in ("input_tokens", "cached_input_tokens", "output_tokens",
                  "reasoning_output_tokens"):
@@ -344,9 +361,9 @@ def _completion_evidence(raw: bytes) -> tuple[dict[str, Any], str]:
     return {
         **tokens,
         "thread_id_sha256": _sha_bytes(thread_id.encode()),
-        "final_message_sha256": _sha_bytes(messages[-1].encode()),
+        "final_message_sha256": _sha_bytes(final_message.encode()),
         "event_stream_sha256": _sha_bytes(raw),
-    }, messages[-1]
+    }, final_message
 
 
 def _partial_event_summary(raw: bytes) -> dict[str, Any]:
