@@ -676,6 +676,26 @@ raise SystemExit(23)
                                     "completion is missing thread id"):
             evaluation._completion_evidence(events)
 
+    def test_completion_rejects_ambiguous_json_events(self):
+        valid_tail = (
+            b'{"type":"turn.started"}',
+            b'{"type":"item.completed","item":{"type":"agent_message","text":"done"}}',
+            b'{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}',
+        )
+        duplicate_key = b'{"type":"error","type":"thread.started","thread_id":"thread"}'
+        nonfinite = (
+            b'{"type":"thread.started","thread_id":"thread"}',
+            b'{"type":"turn.started"}',
+            b'{"type":"item.completed","item":{"type":"agent_message","text":"done"}}',
+            b'{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1},"metric":NaN}',
+        )
+        for events in ((duplicate_key,) + valid_tail, nonfinite):
+            raw = b"\n".join(events) + b"\n"
+            with self.subTest(events=events), self.assertRaises(evaluation.kernel.Rejected):
+                evaluation._completion_evidence(raw)
+            self.assertGreaterEqual(
+                evaluation._partial_event_summary(raw)["malformed_event_line_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

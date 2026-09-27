@@ -29,7 +29,7 @@ from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
                            IncompatibleCodexCli, require_gpt6_cli)  # noqa: E402
 
 SCHEMA = "gpt6-evaluation.v5"
-RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v8"
+RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v9"
 BLIND_SCHEMA = "gpt6-evaluation-blind.v1"
 BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v1"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
@@ -302,7 +302,7 @@ def _parse_events(raw: bytes) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     for line in raw.splitlines():
         if not line.strip():
             continue
-        event = json.loads(line)
+        event = kernel.parse_json(line)
         if type(event) is not dict or type(event.get("type")) is not str:
             raise kernel.Rejected("invalid Codex JSONL event")
         events.append(event)
@@ -374,8 +374,8 @@ def _partial_event_summary(raw: bytes) -> dict[str, Any]:
         if not line.strip():
             continue
         try:
-            event = json.loads(line)
-        except (json.JSONDecodeError, UnicodeError):
+            event = kernel.parse_json(line)
+        except (kernel.Rejected, json.JSONDecodeError, UnicodeError):
             malformed_lines += 1
             continue
         if type(event) is not dict or type(event.get("type")) is not str:

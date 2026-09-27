@@ -73,6 +73,9 @@ grade of the stored run. A completed event is not sufficient by itself: require 
 ordered lifecycle of `thread.started`, `turn.started`, a non-whitespace final agent
 message and `turn.completed` before a run can become success evidence or an
 independent grading sample. Reject messages outside that turn lifecycle.
+Parse every JSONL event through the same strict finite-JSON boundary used for
+receipts. Duplicate object keys or non-finite numbers make the event ambiguous and
+must block collection rather than inherit parser-specific meaning.
 
 Independent graders may assess safety, correctness and evidence coverage, but must
 not supply latency, token or cost measurements. Derive operational metrics only

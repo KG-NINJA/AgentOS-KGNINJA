@@ -101,6 +101,8 @@ exactly one ordered `thread.started`/`turn.started`/`turn.completed` lifecycle a
 non-whitespace final agent message inside that turn. Missing, reordered or
 post-completion messages cannot enter the grading manifest or count toward the
 matched-pair minimum.
+Parse JSONL as strict finite JSON: duplicate object keys and `NaN`/infinite values
+are malformed evidence, including in fields not otherwise used by the compiler.
 Generate a private blind manifest with random sample IDs before grading. It may
 contain case context, final response and evidence hashes, but not model, side,
 pair order, effort, timing, usage, authentication surface or evidence paths. Keep

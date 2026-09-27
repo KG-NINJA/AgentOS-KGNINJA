@@ -172,6 +172,11 @@ under `blocked/`, so an explicit retry cannot erase the earlier diagnosis.
 The checkout is verified again after the model process completes. If its commit or
 contents changed during execution, no success receipt is written and the claim
 remains unresolved for explicit operator reconciliation.
+Receipt schema v9 additionally requires strict finite JSONL: duplicate object keys
+and `NaN`/infinite numbers are rejected even in fields not used for scoring. This
+prevents one stored event stream from acquiring different meanings under different
+JSON parsers. Retain v8 receipts as historical evidence rather than silently
+accepting ambiguous event syntax.
 Receipt schema v8 requires exactly one ordered `thread.started`, `turn.started` and
 `turn.completed` lifecycle, a non-whitespace thread ID and a non-whitespace final
 agent message inside that turn before a Codex event stream can become success
@@ -180,7 +185,7 @@ rejected. Retain v7 receipts as historical evidence instead of silently acceptin
 malformed event order.
 Receipt schema v6 binds the deterministic campaign order to the prior
 authentication, timeout and observation-gap conditions. Retain v1/v2/v3/v4
-and v5 receipts as historical evidence rather than rewriting or mixing them into a v8
+and v5 receipts as historical evidence rather than rewriting or mixing them into a v9
 campaign. Compilation
 parses both UTC observation times, rejects pairs outside the frozen gap and reports
 the largest observed gap plus baseline-first and candidate-first counts. This
