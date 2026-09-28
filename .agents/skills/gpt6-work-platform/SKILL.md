@@ -72,7 +72,9 @@ before aggregation; an evaluator reference without those evidence hashes is not 
 grade of the stored run. A completed event is not sufficient by itself: require one
 ordered lifecycle of `thread.started`, `turn.started`, a non-whitespace final agent
 message and `turn.completed` before a run can become success evidence or an
-independent grading sample. Reject messages outside that turn lifecycle.
+independent grading sample. `thread.started` must be the first stored event and
+`turn.completed` the final stored event; reject any prefix, suffix or message outside
+that lifecycle while allowing documented item events inside it.
 Parse every JSONL event through the same strict finite-JSON boundary used for
 receipts. Duplicate object keys or non-finite numbers make the event ambiguous and
 must block collection rather than inherit parser-specific meaning.

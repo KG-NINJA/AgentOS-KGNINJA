@@ -665,6 +665,25 @@ raise SystemExit(23)
             with self.subTest(events=events), self.assertRaises(evaluation.kernel.Rejected):
                 evaluation._completion_evidence(b"\n".join(events) + b"\n")
 
+    def test_completion_requires_lifecycle_to_bound_stream(self):
+        valid = (
+            b'{"type":"thread.started","thread_id":"thread"}',
+            b'{"type":"turn.started"}',
+            b'{"type":"item.started","item":{"type":"command_execution"}}',
+            b'{"type":"item.completed","item":{"type":"agent_message","text":"done"}}',
+            b'{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}',
+        )
+        malformed = (
+            (b'{"type":"item.started","item":{"type":"command_execution"}}',) + valid,
+            valid + (b'{"type":"item.completed","item":{"type":"command_execution"}}',),
+        )
+        for events in malformed:
+            with self.subTest(events=events), self.assertRaisesRegex(
+                    evaluation.kernel.Rejected, "lifecycle does not bound stream"):
+                evaluation._completion_evidence(b"\n".join(events) + b"\n")
+        completion, _ = evaluation._completion_evidence(b"\n".join(valid) + b"\n")
+        self.assertEqual(completion["input_tokens"], 1)
+
     def test_completion_rejects_whitespace_thread_id(self):
         events = b"\n".join((
             b'{"type":"thread.started","thread_id":"  "}',

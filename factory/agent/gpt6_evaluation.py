@@ -29,7 +29,7 @@ from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
                            IncompatibleCodexCli, require_gpt6_cli)  # noqa: E402
 
 SCHEMA = "gpt6-evaluation.v5"
-RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v9"
+RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v10"
 BLIND_SCHEMA = "gpt6-evaluation-blind.v1"
 BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v1"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
@@ -319,6 +319,8 @@ def _parse_events(raw: bytes) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     completed_index, completed_event = completed[0]
     if not threads[0] < turns[0] < completed_index:
         raise kernel.Rejected("Codex event lifecycle is invalid")
+    if threads[0] != 0 or completed_index != len(events) - 1:
+        raise kernel.Rejected("Codex event lifecycle does not bound stream")
     usage = completed_event.get("usage")
     if type(usage) is not dict or type(usage.get("input_tokens")) is not int or usage["input_tokens"] < 0:
         raise kernel.Rejected("Codex completion is missing usage")
