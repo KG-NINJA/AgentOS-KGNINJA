@@ -105,6 +105,8 @@ completion the final stored event; prefix or suffix events make the stream
 ineligible, while item events remain allowed inside the lifecycle.
 Parse JSONL as strict finite JSON: duplicate object keys and `NaN`/infinite values
 are malformed evidence, including in fields not otherwise used by the compiler.
+Every case/side must also have a distinct event-stream hash. Reusing one raw JSONL
+as more than one execution is ineligible before blind grading and at compilation.
 Generate a private blind manifest with random sample IDs before grading. It may
 contain case context, final response and evidence hashes, but not model, side,
 pair order, effort, timing, usage, authentication surface or evidence paths. Keep

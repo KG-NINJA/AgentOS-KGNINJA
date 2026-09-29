@@ -172,6 +172,11 @@ under `blocked/`, so an explicit retry cannot erase the earlier diagnosis.
 The checkout is verified again after the model process completes. If its commit or
 contents changed during execution, no success receipt is written and the claim
 remains unresolved for explicit operator reconciliation.
+Receipt schema v11 rejects an event-stream hash reused by another case or side in
+the campaign, both before blind grading and again during compilation. A rewritten
+case-specific receipt cannot turn one stored JSONL into multiple distinct completed
+runs. Retain v10 receipts as historical evidence rather than silently counting
+previously accepted duplicate streams.
 Receipt schema v10 requires the lifecycle to bound the complete stored stream:
 `thread.started` is the first nonblank event and `turn.completed` is the last.
 Documented item events remain valid inside that envelope, but prefixed or appended
@@ -190,7 +195,7 @@ rejected. Retain v7 receipts as historical evidence instead of silently acceptin
 malformed event order.
 Receipt schema v6 binds the deterministic campaign order to the prior
 authentication, timeout and observation-gap conditions. Retain v1/v2/v3/v4
-and v5 receipts as historical evidence rather than rewriting or mixing them into a v10
+and v5 receipts as historical evidence rather than rewriting or mixing them into a v11
 campaign. Compilation
 parses both UTC observation times, rejects pairs outside the frozen gap and reports
 the largest observed gap plus baseline-first and candidate-first counts. This

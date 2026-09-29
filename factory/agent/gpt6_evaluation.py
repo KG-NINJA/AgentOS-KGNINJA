@@ -29,7 +29,7 @@ from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
                            IncompatibleCodexCli, require_gpt6_cli)  # noqa: E402
 
 SCHEMA = "gpt6-evaluation.v5"
-RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v10"
+RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v11"
 BLIND_SCHEMA = "gpt6-evaluation-blind.v1"
 BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v1"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
@@ -651,6 +651,7 @@ def prepare_blind_grading(campaign_path: Path, evidence_dir: Path,
         raise kernel.Rejected("blind grading outputs must be new distinct files")
     campaign = load_campaign(campaign_path)
     used: set[str] = set()
+    event_streams: set[str] = set()
     public_samples: list[dict[str, Any]] = []
     private_mappings: list[dict[str, Any]] = []
     for case in campaign["cases"]:
@@ -660,6 +661,10 @@ def prepare_blind_grading(campaign_path: Path, evidence_dir: Path,
                 sample_id = secrets.token_hex(32)
             used.add(sample_id)
             public, private = _blind_sample(campaign, case, side, evidence_dir, sample_id)
+            event_stream_sha256 = private["event_stream_sha256"]
+            if event_stream_sha256 in event_streams:
+                raise kernel.Rejected("duplicate event stream cannot represent distinct runs")
+            event_streams.add(event_stream_sha256)
             public_samples.append(public)
             private_mappings.append(private)
     public_samples.sort(key=lambda sample: sample["sample_id"])
@@ -756,6 +761,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
     pairs = []
     campaign_auth_surface: str | None = None
     campaign_codex_version: str | None = None
+    event_streams: set[str] = set()
     max_observed_pair_gap_seconds = 0.0
     order_counts = {"baseline-first": 0, "candidate-first": 0}
     for case in campaign["cases"]:
@@ -804,8 +810,12 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
                 raise kernel.Rejected("campaign Codex CLI version changed")
             raw = raw_path.read_bytes()
             completion, _ = _completion_evidence(raw)
-            if _sha_bytes(raw) != receipt["event_stream_sha256"]:
+            event_stream_sha256 = _sha_bytes(raw)
+            if event_stream_sha256 != receipt["event_stream_sha256"]:
                 raise kernel.Rejected("raw event evidence does not match receipt")
+            if event_stream_sha256 in event_streams:
+                raise kernel.Rejected("duplicate event stream cannot represent distinct runs")
+            event_streams.add(event_stream_sha256)
             try:
                 latency_ms = kernel.number(receipt["latency_ms"], positive=True)
             except kernel.Rejected as exc:
@@ -824,13 +834,13 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
             if public != expected_public or blind != expected_blind:
                 raise kernel.Rejected("blind manifest or mapping does not match evidence")
             if (blind["receipt_sha256"] != kernel.digest(receipt)
-                    or blind["event_stream_sha256"] != _sha_bytes(raw)):
+                    or blind["event_stream_sha256"] != event_stream_sha256):
                 raise kernel.Rejected("blind mapping is not bound to evidence")
             grade = grade_map.get(blind["sample_id"])
             if grade is None:
                 raise kernel.Rejected("missing independent grade")
             if (grade["receipt_sha256"] != blind["receipt_sha256"]
-                    or grade["event_stream_sha256"] != _sha_bytes(raw)):
+                    or grade["event_stream_sha256"] != event_stream_sha256):
                 raise kernel.Rejected("independent grade is not bound to evidence")
             pair[side] = {"model": receipt["requested_model"], "effort": receipt["requested_effort"],
                           "completed": receipt["completed"], "safety_pass": grade["safety_pass"],

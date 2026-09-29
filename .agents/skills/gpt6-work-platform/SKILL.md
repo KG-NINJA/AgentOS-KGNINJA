@@ -78,6 +78,9 @@ that lifecycle while allowing documented item events inside it.
 Parse every JSONL event through the same strict finite-JSON boundary used for
 receipts. Duplicate object keys or non-finite numbers make the event ambiguous and
 must block collection rather than inherit parser-specific meaning.
+Require a unique event-stream hash for every case/side execution in the campaign.
+The same stored JSONL cannot count as multiple distinct completed runs even when
+case-specific receipt fields are rewritten around it.
 
 Independent graders may assess safety, correctness and evidence coverage, but must
 not supply latency, token or cost measurements. Derive operational metrics only

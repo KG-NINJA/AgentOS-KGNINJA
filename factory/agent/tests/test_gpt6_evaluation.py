@@ -78,14 +78,15 @@ class EvaluationTests(unittest.TestCase):
         self.campaign_path.write_text(json.dumps(self.campaign))
         self.fake = self.root / "codex"
         self.fake.write_text("""#!/usr/bin/env python3
-import json,os,sys
+import hashlib,json,os,sys
 if sys.argv[1:] == ['--version']:
  print('codex-cli 9.9.9'); raise SystemExit
 if sys.argv[1:] == ['login','status']:
  print('Logged in using ChatGPT'); raise SystemExit
 if not os.isatty(0):
  print('Codex received non-terminal stdin', file=sys.stderr); raise SystemExit(98)
-print(json.dumps({'type':'thread.started','thread_id':'test-thread'}))
+thread_id=hashlib.sha256('\\0'.join(sys.argv).encode()).hexdigest()
+print(json.dumps({'type':'thread.started','thread_id':thread_id}))
 print(json.dumps({'type':'turn.started'}))
 print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'GPT6_ACCESS_PROBE_OK'}}))
 print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_input_tokens':0,'output_tokens':5,'reasoning_output_tokens':1}}))
@@ -627,8 +628,38 @@ raise SystemExit(23)
             for side in (case["first_side"], second_side):
                 evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
                                    evidence, 10, str(self.fake))
+        source = self.campaign["cases"][0]["id"] + ".baseline"
+        target = self.campaign["cases"][1]["id"] + ".baseline"
+        source_raw = (evidence / f"{source}.jsonl").read_bytes()
+        target_raw_path = evidence / f"{target}.jsonl"
+        target_receipt_path = evidence / f"{target}.receipt.json"
+        original_raw = target_raw_path.read_bytes()
+        original_receipt = target_receipt_path.read_bytes()
+
+        def duplicate_event_stream() -> None:
+            target_raw_path.write_bytes(source_raw)
+            receipt = evaluation.kernel.load_json(target_receipt_path)
+            completion, _ = evaluation._completion_evidence(source_raw)
+            receipt.update(completion)
+            target_receipt_path.write_bytes(evaluation.kernel.canonical(receipt) + b"\n")
+
+        duplicate_event_stream()
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "duplicate event stream"):
+            evaluation.prepare_blind_grading(
+                self.campaign_path, evidence, self.root / "duplicate-blind.json",
+                self.root / "duplicate-map.json")
+        target_raw_path.write_bytes(original_raw)
+        target_receipt_path.write_bytes(original_receipt)
         manifest_path, mapping_path, grade_path, _, _ = prepare_grades(
             self.root, self.campaign_path, evidence, "-corrupt")
+        duplicate_event_stream()
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "duplicate event stream"):
+            evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                      manifest_path, mapping_path)
+        target_raw_path.write_bytes(original_raw)
+        target_receipt_path.write_bytes(original_receipt)
         (evidence / f"{self.candidate_case_id}.candidate.jsonl").write_text('{"type":"error"}\n')
         with self.assertRaises(evaluation.kernel.Rejected):
             evaluation.compile_report(self.campaign_path, evidence, grade_path,
