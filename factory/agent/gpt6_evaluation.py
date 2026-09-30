@@ -222,15 +222,10 @@ def _require_first_side_evidence(campaign: dict[str, Any], case: dict[str, Any],
     if (raw_path.is_symlink() or receipt_path.is_symlink()
             or not raw_path.is_file() or not receipt_path.is_file()):
         raise kernel.Rejected("campaign-selected first side must complete before second side")
-    receipt = kernel.load_json(receipt_path)
-    if (type(receipt) is not dict or receipt.get("schema_version") != RECEIPT_SCHEMA
-            or receipt.get("campaign_sha256") != kernel.digest(campaign)
-            or receipt.get("case_id") != case["id"]
-            or receipt.get("side") != first_side
-            or receipt.get("pair_order") != _pair_order(case)
-            or receipt.get("completed") is not True
-            or receipt.get("event_stream_sha256") != _sha_bytes(raw_path.read_bytes())):
-        raise kernel.Rejected("campaign-selected first side evidence is invalid")
+    try:
+        _validated_completed_evidence(campaign, case, first_side, evidence_dir)
+    except (kernel.Rejected, OSError, json.JSONDecodeError, UnicodeError) as exc:
+        raise kernel.Rejected("campaign-selected first side evidence is invalid") from exc
 
 
 def _observed_epoch(value: Any) -> float:
@@ -366,6 +361,53 @@ def _completion_evidence(raw: bytes) -> tuple[dict[str, Any], str]:
         "final_message_sha256": _sha_bytes(final_message.encode()),
         "event_stream_sha256": _sha_bytes(raw),
     }, final_message
+
+
+def _validated_completed_evidence(campaign: dict[str, Any], case: dict[str, Any],
+                                  side: str, evidence_dir: Path
+                                  ) -> tuple[dict[str, Any], str]:
+    """Load one completed run and re-derive its evidence-bound fields."""
+    receipt_path = evidence_dir / f"{case['id']}.{side}.receipt.json"
+    raw_path = evidence_dir / f"{case['id']}.{side}.jsonl"
+    if (evidence_dir.is_symlink() or receipt_path.is_symlink() or raw_path.is_symlink()
+            or not receipt_path.is_file() or not raw_path.is_file()):
+        raise kernel.Rejected("completed evidence paths are invalid")
+    receipt = kernel.load_json(receipt_path)
+    expected = {"schema_version", "campaign_sha256", "case_id", "side", "pair_order", "category",
+                "requested_model", "requested_effort", "budget_id", "input_sha256",
+                "timeout_seconds", "max_pair_gap_seconds", "prompt_sha256", "source_commit",
+                "codex_version", "auth_surface", "observed_at", "provider_model_identity_verified",
+                "completed", "latency_ms", "input_tokens", "cached_input_tokens", "output_tokens",
+                "reasoning_output_tokens", "thread_id_sha256", "final_message_sha256",
+                "event_stream_sha256"}
+    if type(receipt) is not dict or set(receipt) != expected:
+        raise kernel.Rejected("invalid receipt schema")
+    if (receipt["schema_version"] != RECEIPT_SCHEMA
+            or receipt["campaign_sha256"] != kernel.digest(campaign)
+            or receipt["case_id"] != case["id"] or receipt["side"] != side
+            or receipt["pair_order"] != _pair_order(case)
+            or receipt["category"] != case["category"]
+            or receipt["requested_model"] != campaign[side + "_model"]
+            or receipt["requested_effort"] != campaign["effort"]
+            or receipt["budget_id"] != campaign["budget_id"]
+            or receipt["timeout_seconds"] != campaign["timeout_seconds"]
+            or receipt["max_pair_gap_seconds"] != campaign["max_pair_gap_seconds"]
+            or receipt["input_sha256"] != case_input_sha(campaign, case)
+            or receipt["prompt_sha256"] != _sha_bytes(case["prompt"].encode())
+            or receipt["source_commit"] != campaign["source_commit"]
+            or receipt["auth_surface"] not in AUTH_SURFACES
+            or receipt["provider_model_identity_verified"] is not False
+            or receipt["completed"] is not True):
+        raise kernel.Rejected("receipt does not match campaign")
+    _validated_codex_version(receipt["codex_version"])
+    raw = raw_path.read_bytes()
+    completion, final_message = _completion_evidence(raw)
+    if _sha_bytes(raw) != receipt["event_stream_sha256"]:
+        raise kernel.Rejected("raw event evidence does not match receipt")
+    for field, value in completion.items():
+        if receipt[field] != value:
+            raise kernel.Rejected("receipt completion metrics do not match raw evidence")
+    return receipt, final_message
 
 
 def _partial_event_summary(raw: bytes) -> dict[str, Any]:
@@ -587,44 +629,8 @@ def probe(effort: str, workspace: Path, timeout_seconds: int,
 
 def _blind_sample(campaign: dict[str, Any], case: dict[str, Any], side: str,
                   evidence_dir: Path, sample_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    receipt_path = evidence_dir / f"{case['id']}.{side}.receipt.json"
-    raw_path = evidence_dir / f"{case['id']}.{side}.jsonl"
-    receipt = kernel.load_json(receipt_path)
-    expected = {"schema_version", "campaign_sha256", "case_id", "side", "pair_order", "category",
-                "requested_model", "requested_effort", "budget_id", "input_sha256",
-                "timeout_seconds", "max_pair_gap_seconds", "prompt_sha256", "source_commit",
-                "codex_version", "auth_surface", "observed_at", "provider_model_identity_verified",
-                "completed", "latency_ms", "input_tokens", "cached_input_tokens", "output_tokens",
-                "reasoning_output_tokens", "thread_id_sha256", "final_message_sha256",
-                "event_stream_sha256"}
-    if type(receipt) is not dict or set(receipt) != expected:
-        raise kernel.Rejected("invalid receipt schema")
-    campaign_sha256 = kernel.digest(campaign)
-    if (receipt["schema_version"] != RECEIPT_SCHEMA
-            or receipt["campaign_sha256"] != campaign_sha256
-            or receipt["case_id"] != case["id"] or receipt["side"] != side
-            or receipt["pair_order"] != _pair_order(case)
-            or receipt["category"] != case["category"]
-            or receipt["requested_model"] != campaign[side + "_model"]
-            or receipt["requested_effort"] != campaign["effort"]
-            or receipt["budget_id"] != campaign["budget_id"]
-            or receipt["timeout_seconds"] != campaign["timeout_seconds"]
-            or receipt["max_pair_gap_seconds"] != campaign["max_pair_gap_seconds"]
-            or receipt["input_sha256"] != case_input_sha(campaign, case)
-            or receipt["prompt_sha256"] != _sha_bytes(case["prompt"].encode())
-            or receipt["source_commit"] != campaign["source_commit"]
-            or receipt["auth_surface"] not in AUTH_SURFACES
-            or receipt["provider_model_identity_verified"] is not False
-            or receipt["completed"] is not True):
-        raise kernel.Rejected("receipt does not match campaign")
-    _validated_codex_version(receipt["codex_version"])
-    raw = raw_path.read_bytes()
-    completion, final_message = _completion_evidence(raw)
-    if _sha_bytes(raw) != receipt["event_stream_sha256"]:
-        raise kernel.Rejected("raw event evidence does not match receipt")
-    for field, value in completion.items():
-        if receipt[field] != value:
-            raise kernel.Rejected("receipt completion metrics do not match raw evidence")
+    receipt, final_message = _validated_completed_evidence(
+        campaign, case, side, evidence_dir)
     receipt_sha256 = kernel.digest(receipt)
     public_sample = {"sample_id": sample_id, "case_id": case["id"],
                      "category": case["category"], "prompt": case["prompt"],

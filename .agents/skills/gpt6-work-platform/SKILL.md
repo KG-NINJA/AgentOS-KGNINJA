@@ -62,6 +62,10 @@ Counterbalance which model runs first across the campaign. The baseline-first an
 candidate-first counts may differ by at most one, and the selected first side must
 complete before its mate starts. Do not let a fixed order or warm-cache effect be
 silently attributed to the candidate model.
+Before starting the mate, re-validate the selected first side's complete receipt
+schema and strict raw JSONL lifecycle, not only its completed flag or file hash.
+A forged or incomplete first-side receipt must stop before any second-side model
+version, authentication or inference check.
 Derive that order deterministically from the frozen source commit, case identifiers
 and prompt hashes. A balanced but manually selected order is not an equivalent
 campaign because it can assign favorable order to chosen cases after inspection.

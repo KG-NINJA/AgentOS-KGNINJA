@@ -147,7 +147,9 @@ python3 factory/agent/gpt6_evaluation.py collect --campaign campaign.json \
 For a candidate-first case, reverse those two commands. The second-side command is
 rejected before Codex version, authentication or inference checks unless the exact
 first-side receipt and raw event stream already form completed, hash-consistent
-evidence for this campaign.
+evidence for this campaign. The gate re-validates the complete receipt schema and
+re-derives the strict JSONL lifecycle; `completed: true` plus a matching raw-file
+hash is not sufficient.
 
 By default, receipts and raw JSONL are written under the collector repository's
 ignored `runtime/` storage with directory mode 0700 and file mode 0600. That

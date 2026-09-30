@@ -247,6 +247,27 @@ raise SystemExit(99)
         version.assert_not_called()
         execute.assert_not_called()
 
+    def test_collect_rejects_second_side_when_first_receipt_hides_incomplete_raw(self):
+        evidence = self.root / "evidence"
+        case_id = self.baseline_case_id
+        evaluation.collect(self.campaign_path, case_id, "baseline", self.workspace,
+                           evidence, 10, str(self.fake))
+        raw_path = evidence / f"{case_id}.baseline.jsonl"
+        receipt_path = evidence / f"{case_id}.baseline.receipt.json"
+        forged_raw = b'{"type":"thread.started","thread_id":"forged"}\n'
+        raw_path.write_bytes(forged_raw)
+        receipt = evaluation.kernel.load_json(receipt_path)
+        receipt["event_stream_sha256"] = evaluation._sha_bytes(forged_raw)
+        receipt_path.write_bytes(evaluation.kernel.canonical(receipt) + b"\n")
+        with mock.patch.object(evaluation, "_codex_version") as version, \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                        "first side evidence is invalid"):
+                evaluation.collect(self.campaign_path, case_id, "candidate", self.workspace,
+                                   evidence, 10, str(self.fake))
+        version.assert_not_called()
+        execute.assert_not_called()
+
     def test_ignored_workspace_drift_during_execution_is_not_promoted(self):
         evidence = self.root / "evidence"
         real_execute = evaluation.execute
