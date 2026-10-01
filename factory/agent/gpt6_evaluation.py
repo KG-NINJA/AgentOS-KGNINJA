@@ -29,9 +29,9 @@ from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
                            IncompatibleCodexCli, require_gpt6_cli)  # noqa: E402
 
 SCHEMA = "gpt6-evaluation.v5"
-RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v11"
+RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v12"
 BLIND_SCHEMA = "gpt6-evaluation-blind.v1"
-BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v1"
+BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v2"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
@@ -640,6 +640,7 @@ def _blind_sample(campaign: dict[str, Any], case: dict[str, Any], side: str,
                      "final_message": final_message}
     private_mapping = {"sample_id": sample_id, "case_id": case["id"], "side": side,
                        "receipt_sha256": receipt_sha256,
+                       "thread_id_sha256": receipt["thread_id_sha256"],
                        "event_stream_sha256": receipt["event_stream_sha256"]}
     return public_sample, private_mapping
 
@@ -658,6 +659,7 @@ def prepare_blind_grading(campaign_path: Path, evidence_dir: Path,
     campaign = load_campaign(campaign_path)
     used: set[str] = set()
     event_streams: set[str] = set()
+    thread_ids: set[str] = set()
     public_samples: list[dict[str, Any]] = []
     private_mappings: list[dict[str, Any]] = []
     for case in campaign["cases"]:
@@ -671,6 +673,10 @@ def prepare_blind_grading(campaign_path: Path, evidence_dir: Path,
             if event_stream_sha256 in event_streams:
                 raise kernel.Rejected("duplicate event stream cannot represent distinct runs")
             event_streams.add(event_stream_sha256)
+            thread_id_sha256 = private["thread_id_sha256"]
+            if thread_id_sha256 in thread_ids:
+                raise kernel.Rejected("duplicate thread id cannot represent distinct runs")
+            thread_ids.add(thread_id_sha256)
             public_samples.append(public)
             private_mappings.append(private)
     public_samples.sort(key=lambda sample: sample["sample_id"])
@@ -721,7 +727,8 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
         raise kernel.Rejected("invalid blind mapping")
     mapping_map: dict[tuple[str, str], dict[str, Any]] = {}
     sample_ids: set[str] = set()
-    required_mapping = {"sample_id", "case_id", "side", "receipt_sha256", "event_stream_sha256"}
+    required_mapping = {"sample_id", "case_id", "side", "receipt_sha256",
+                        "thread_id_sha256", "event_stream_sha256"}
     for sample in mapping["samples"]:
         if type(sample) is not dict or set(sample) != required_mapping:
             raise kernel.Rejected("invalid blind mapping")
@@ -731,7 +738,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
                 or not kernel.SHA.fullmatch(sample["sample_id"])
                 or sample["sample_id"] in sample_ids):
             raise kernel.Rejected("duplicate or invalid blind mapping")
-        for field in ("receipt_sha256", "event_stream_sha256"):
+        for field in ("receipt_sha256", "thread_id_sha256", "event_stream_sha256"):
             if type(sample[field]) is not str or not kernel.SHA.fullmatch(sample[field]):
                 raise kernel.Rejected("blind mapping is missing an evidence hash")
         mapping_map[key] = sample
@@ -768,6 +775,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
     campaign_auth_surface: str | None = None
     campaign_codex_version: str | None = None
     event_streams: set[str] = set()
+    thread_ids: set[str] = set()
     max_observed_pair_gap_seconds = 0.0
     order_counts = {"baseline-first": 0, "candidate-first": 0}
     for case in campaign["cases"]:
@@ -822,6 +830,10 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
             if event_stream_sha256 in event_streams:
                 raise kernel.Rejected("duplicate event stream cannot represent distinct runs")
             event_streams.add(event_stream_sha256)
+            thread_id_sha256 = completion["thread_id_sha256"]
+            if thread_id_sha256 in thread_ids:
+                raise kernel.Rejected("duplicate thread id cannot represent distinct runs")
+            thread_ids.add(thread_id_sha256)
             try:
                 latency_ms = kernel.number(receipt["latency_ms"], positive=True)
             except kernel.Rejected as exc:
@@ -840,6 +852,7 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
             if public != expected_public or blind != expected_blind:
                 raise kernel.Rejected("blind manifest or mapping does not match evidence")
             if (blind["receipt_sha256"] != kernel.digest(receipt)
+                    or blind["thread_id_sha256"] != thread_id_sha256
                     or blind["event_stream_sha256"] != event_stream_sha256):
                 raise kernel.Rejected("blind mapping is not bound to evidence")
             grade = grade_map.get(blind["sample_id"])

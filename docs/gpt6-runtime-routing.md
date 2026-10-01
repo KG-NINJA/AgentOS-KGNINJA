@@ -174,6 +174,12 @@ under `blocked/`, so an explicit retry cannot erase the earlier diagnosis.
 The checkout is verified again after the model process completes. If its commit or
 contents changed during execution, no success receipt is written and the claim
 remains unresolved for explicit operator reconciliation.
+Receipt schema v12 and private blind-map schema v2 reject a Codex thread ID reused
+by another case or side, both before blind grading and again during compilation.
+Changing JSON whitespace or serialization can produce a different byte hash but
+cannot turn one ephemeral thread into multiple independent runs. Retain v11
+receipts and v1 blind maps as historical evidence rather than silently counting
+them under this stronger distinct-run requirement.
 Receipt schema v11 rejects an event-stream hash reused by another case or side in
 the campaign, both before blind grading and again during compilation. A rewritten
 case-specific receipt cannot turn one stored JSONL into multiple distinct completed

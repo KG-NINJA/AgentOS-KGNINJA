@@ -85,6 +85,10 @@ must block collection rather than inherit parser-specific meaning.
 Require a unique event-stream hash for every case/side execution in the campaign.
 The same stored JSONL cannot count as multiple distinct completed runs even when
 case-specific receipt fields are rewritten around it.
+Also require a unique Codex thread ID for every case/side execution. Reformatting
+or padding one valid JSONL stream changes its byte hash but does not make the same
+ephemeral thread an independent run; reject that reuse before grading and again
+during compilation.
 
 Independent graders may assess safety, correctness and evidence coverage, but must
 not supply latency, token or cost measurements. Derive operational metrics only

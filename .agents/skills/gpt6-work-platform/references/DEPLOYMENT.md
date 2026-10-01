@@ -110,6 +110,8 @@ Parse JSONL as strict finite JSON: duplicate object keys and `NaN`/infinite valu
 are malformed evidence, including in fields not otherwise used by the compiler.
 Every case/side must also have a distinct event-stream hash. Reusing one raw JSONL
 as more than one execution is ineligible before blind grading and at compilation.
+Every case/side must also have a distinct Codex thread ID. Byte-distinct JSONL that
+reuses one thread remains one execution and is likewise ineligible at both gates.
 Generate a private blind manifest with random sample IDs before grading. It may
 contain case context, final response and evidence hashes, but not model, side,
 pair order, effort, timing, usage, authentication surface or evidence paths. Keep

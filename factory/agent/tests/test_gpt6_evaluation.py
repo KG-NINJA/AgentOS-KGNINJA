@@ -664,6 +664,14 @@ raise SystemExit(23)
             receipt.update(completion)
             target_receipt_path.write_bytes(evaluation.kernel.canonical(receipt) + b"\n")
 
+        def duplicate_thread_with_distinct_stream() -> None:
+            rewritten_raw = b"\n" + source_raw
+            target_raw_path.write_bytes(rewritten_raw)
+            receipt = evaluation.kernel.load_json(target_receipt_path)
+            completion, _ = evaluation._completion_evidence(rewritten_raw)
+            receipt.update(completion)
+            target_receipt_path.write_bytes(evaluation.kernel.canonical(receipt) + b"\n")
+
         duplicate_event_stream()
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "duplicate event stream"):
@@ -672,11 +680,26 @@ raise SystemExit(23)
                 self.root / "duplicate-map.json")
         target_raw_path.write_bytes(original_raw)
         target_receipt_path.write_bytes(original_receipt)
+        duplicate_thread_with_distinct_stream()
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "duplicate thread id"):
+            evaluation.prepare_blind_grading(
+                self.campaign_path, evidence, self.root / "duplicate-thread-blind.json",
+                self.root / "duplicate-thread-map.json")
+        target_raw_path.write_bytes(original_raw)
+        target_receipt_path.write_bytes(original_receipt)
         manifest_path, mapping_path, grade_path, _, _ = prepare_grades(
             self.root, self.campaign_path, evidence, "-corrupt")
         duplicate_event_stream()
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "duplicate event stream"):
+            evaluation.compile_report(self.campaign_path, evidence, grade_path,
+                                      manifest_path, mapping_path)
+        target_raw_path.write_bytes(original_raw)
+        target_receipt_path.write_bytes(original_receipt)
+        duplicate_thread_with_distinct_stream()
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "duplicate thread id"):
             evaluation.compile_report(self.campaign_path, evidence, grade_path,
                                       manifest_path, mapping_path)
         target_raw_path.write_bytes(original_raw)
