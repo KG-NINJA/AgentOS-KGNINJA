@@ -66,6 +66,9 @@ Before starting the mate, re-validate the selected first side's complete receipt
 schema and strict raw JSONL lifecycle, not only its completed flag or file hash.
 A forged or incomplete first-side receipt must stop before any second-side model
 version, authentication or inference check.
+Record the validated first-side receipt and raw event-stream hashes in the mate's
+receipt. Recompute that binding before grading and aggregation so later edits to
+the predecessor invalidate the pair.
 Derive that order deterministically from the frozen source commit, case identifiers
 and prompt hashes. A balanced but manually selected order is not an equivalent
 campaign because it can assign favorable order to chosen cases after inspection.

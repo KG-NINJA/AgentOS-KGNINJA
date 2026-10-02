@@ -150,6 +150,10 @@ first-side receipt and raw event stream already form completed, hash-consistent
 evidence for this campaign. The gate re-validates the complete receipt schema and
 re-derives the strict JSONL lifecycle; `completed: true` plus a matching raw-file
 hash is not sufficient.
+The successful mate receipt also records the canonical first-side receipt hash
+and raw event-stream hash that passed this preflight. Later grading and compilation
+recompute both, so replacing or editing the first-side evidence after the mate ran
+invalidates the pair rather than silently changing what authorized the second run.
 
 By default, receipts and raw JSONL are written under the collector repository's
 ignored `runtime/` storage with directory mode 0700 and file mode 0600. That
@@ -174,6 +178,9 @@ under `blocked/`, so an explicit retry cannot erase the earlier diagnosis.
 The checkout is verified again after the model process completes. If its commit or
 contents changed during execution, no success receipt is written and the claim
 remains unresolved for explicit operator reconciliation.
+Receipt schema v13 binds every mate run to the exact first-side receipt and raw
+event stream that authorized it. Retain v12 receipts as historical evidence rather
+than inferring this missing predecessor binding after execution.
 Receipt schema v12 and private blind-map schema v2 reject a Codex thread ID reused
 by another case or side, both before blind grading and again during compilation.
 Changing JSON whitespace or serialization can produce a different byte hash but

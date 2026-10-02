@@ -268,6 +268,34 @@ raise SystemExit(99)
         version.assert_not_called()
         execute.assert_not_called()
 
+    def test_second_side_receipt_binds_exact_first_side_evidence(self):
+        evidence = self.root / "evidence"
+        case_id = self.baseline_case_id
+        evaluation.collect(self.campaign_path, case_id, "baseline", self.workspace,
+                           evidence, 10, str(self.fake))
+        evaluation.collect(self.campaign_path, case_id, "candidate", self.workspace,
+                           evidence, 10, str(self.fake))
+        case = evaluation._case(self.campaign, case_id)
+        first_path = evidence / f"{case_id}.baseline.receipt.json"
+        mate_path = evidence / f"{case_id}.candidate.receipt.json"
+        first = evaluation.kernel.load_json(first_path)
+        mate = evaluation.kernel.load_json(mate_path)
+        self.assertIsNone(first["predecessor_receipt_sha256"])
+        self.assertIsNone(first["predecessor_event_stream_sha256"])
+        self.assertEqual(mate["predecessor_receipt_sha256"],
+                         evaluation.kernel.digest(first))
+        self.assertEqual(mate["predecessor_event_stream_sha256"],
+                         first["event_stream_sha256"])
+
+        # This field is individually valid and is not raw-derived, but changing it
+        # must invalidate the mate's proof of which first-side receipt authorized it.
+        first["latency_ms"] += 1
+        first_path.write_bytes(evaluation.kernel.canonical(first) + b"\n")
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "predecessor evidence"):
+            evaluation._validated_completed_evidence(
+                self.campaign, case, "candidate", evidence)
+
     def test_ignored_workspace_drift_during_execution_is_not_promoted(self):
         evidence = self.root / "evidence"
         real_execute = evaluation.execute
@@ -564,7 +592,9 @@ raise SystemExit(23)
         with self.assertRaisesRegex(evaluation.kernel.Rejected, "must be new distinct"):
             evaluation.prepare_blind_grading(self.campaign_path, evidence,
                                              manifest_path, mapping_path)
-        receipt_path = evidence / f"{self.candidate_case_id}.candidate.receipt.json"
+        # Mutate the mate receipt so these field-specific checks are not
+        # preempted by the predecessor binding on the opposite side.
+        receipt_path = evidence / f"{self.candidate_case_id}.baseline.receipt.json"
         receipt = json.loads(receipt_path.read_text())
         receipt["auth_surface"] = "api_key"
         receipt_path.write_text(json.dumps(receipt))

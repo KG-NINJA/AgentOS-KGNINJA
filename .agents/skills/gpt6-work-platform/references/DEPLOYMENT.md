@@ -95,6 +95,9 @@ most one), and complete the campaign-selected first side before its mate starts.
 The mate-side preflight must re-validate the first side's exact campaign-bound
 receipt schema and re-derive its strict completed lifecycle from raw JSONL. A
 matching file hash and `completed: true` field alone do not satisfy execution order.
+The mate receipt must bind the exact validated first-side receipt and raw
+event-stream hashes. Recompute both before grading and compilation; do not accept
+a pair if its predecessor changed after the mate was authorized.
 The order must match the deterministic schedule derived from the frozen source
 commit, case identifiers and prompt hashes; do not hand-pick which model goes first.
 Independent grades must name the exact receipt and raw event-stream hashes they

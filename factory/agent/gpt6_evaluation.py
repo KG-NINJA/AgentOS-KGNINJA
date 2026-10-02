@@ -29,7 +29,7 @@ from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
                            IncompatibleCodexCli, require_gpt6_cli)  # noqa: E402
 
 SCHEMA = "gpt6-evaluation.v5"
-RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v12"
+RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v13"
 BLIND_SCHEMA = "gpt6-evaluation-blind.v1"
 BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v2"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
@@ -209,11 +209,12 @@ def _pair_order(case: dict[str, Any]) -> str:
 
 
 def _require_first_side_evidence(campaign: dict[str, Any], case: dict[str, Any],
-                                 side: str, evidence_dir: Path) -> None:
-    """Stop a second-side call until the campaign-selected first side completed."""
+                                 side: str, evidence_dir: Path
+                                 ) -> tuple[str | None, str | None]:
+    """Return the exact first-side evidence hashes that authorize a mate call."""
     first_side = case["first_side"]
     if side == first_side:
-        return
+        return None, None
     if evidence_dir.is_symlink():
         raise kernel.Rejected("evidence directory must not be a symlink")
     stem = case["id"] + "." + first_side
@@ -223,9 +224,11 @@ def _require_first_side_evidence(campaign: dict[str, Any], case: dict[str, Any],
             or not raw_path.is_file() or not receipt_path.is_file()):
         raise kernel.Rejected("campaign-selected first side must complete before second side")
     try:
-        _validated_completed_evidence(campaign, case, first_side, evidence_dir)
+        receipt, _ = _validated_completed_evidence(
+            campaign, case, first_side, evidence_dir)
     except (kernel.Rejected, OSError, json.JSONDecodeError, UnicodeError) as exc:
         raise kernel.Rejected("campaign-selected first side evidence is invalid") from exc
+    return kernel.digest(receipt), receipt["event_stream_sha256"]
 
 
 def _observed_epoch(value: Any) -> float:
@@ -379,7 +382,8 @@ def _validated_completed_evidence(campaign: dict[str, Any], case: dict[str, Any]
                 "codex_version", "auth_surface", "observed_at", "provider_model_identity_verified",
                 "completed", "latency_ms", "input_tokens", "cached_input_tokens", "output_tokens",
                 "reasoning_output_tokens", "thread_id_sha256", "final_message_sha256",
-                "event_stream_sha256"}
+                "event_stream_sha256", "predecessor_receipt_sha256",
+                "predecessor_event_stream_sha256"}
     if type(receipt) is not dict or set(receipt) != expected:
         raise kernel.Rejected("invalid receipt schema")
     if (receipt["schema_version"] != RECEIPT_SCHEMA
@@ -399,6 +403,17 @@ def _validated_completed_evidence(campaign: dict[str, Any], case: dict[str, Any]
             or receipt["provider_model_identity_verified"] is not False
             or receipt["completed"] is not True):
         raise kernel.Rejected("receipt does not match campaign")
+    predecessor_receipt_sha256: str | None = None
+    predecessor_event_stream_sha256: str | None = None
+    if side != case["first_side"]:
+        predecessor, _ = _validated_completed_evidence(
+            campaign, case, case["first_side"], evidence_dir)
+        predecessor_receipt_sha256 = kernel.digest(predecessor)
+        predecessor_event_stream_sha256 = predecessor["event_stream_sha256"]
+    if (receipt["predecessor_receipt_sha256"] != predecessor_receipt_sha256
+            or receipt["predecessor_event_stream_sha256"]
+            != predecessor_event_stream_sha256):
+        raise kernel.Rejected("receipt predecessor evidence does not match")
     _validated_codex_version(receipt["codex_version"])
     raw = raw_path.read_bytes()
     completion, final_message = _completion_evidence(raw)
@@ -527,7 +542,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
         timeout_seconds = campaign["timeout_seconds"]
     elif timeout_seconds != campaign["timeout_seconds"]:
         raise kernel.Rejected("timeout does not match campaign")
-    _require_first_side_evidence(campaign, case, side, evidence_dir)
+    predecessor_receipt_sha256, predecessor_event_stream_sha256 = \
+        _require_first_side_evidence(campaign, case, side, evidence_dir)
     verify_workspace(workspace, campaign["source_commit"])
     model = campaign[side + "_model"]
     version = _codex_version(executable)
@@ -595,6 +611,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
                    "source_commit": campaign["source_commit"], "codex_version": version,
                    "auth_surface": auth_surface,
                    "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                   "predecessor_receipt_sha256": predecessor_receipt_sha256,
+                   "predecessor_event_stream_sha256": predecessor_event_stream_sha256,
                    "provider_model_identity_verified": False, **summary}
         _write_private(receipt_path, receipt)
         resolved = True
@@ -785,7 +803,8 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
         for side in ("baseline", "candidate"):
             receipt_path = evidence_dir / f"{case['id']}.{side}.receipt.json"
             raw_path = evidence_dir / f"{case['id']}.{side}.jsonl"
-            receipt = kernel.load_json(receipt_path)
+            receipt, _ = _validated_completed_evidence(
+                campaign, case, side, evidence_dir)
             expected = {"schema_version", "campaign_sha256", "case_id", "side", "pair_order", "category",
                         "requested_model", "requested_effort", "budget_id", "input_sha256",
                         "timeout_seconds", "max_pair_gap_seconds", "prompt_sha256",
@@ -794,7 +813,8 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
                         "observed_at",
                         "provider_model_identity_verified", "completed", "latency_ms", "input_tokens",
                         "cached_input_tokens", "output_tokens", "reasoning_output_tokens",
-                        "thread_id_sha256", "final_message_sha256", "event_stream_sha256"}
+                        "thread_id_sha256", "final_message_sha256", "event_stream_sha256",
+                        "predecessor_receipt_sha256", "predecessor_event_stream_sha256"}
             if type(receipt) is not dict or set(receipt) != expected:
                 raise kernel.Rejected("invalid receipt schema")
             receipt_codex_version = _validated_codex_version(receipt["codex_version"])
