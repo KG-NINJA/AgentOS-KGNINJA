@@ -592,9 +592,13 @@ raise SystemExit(23)
         with self.assertRaisesRegex(evaluation.kernel.Rejected, "must be new distinct"):
             evaluation.prepare_blind_grading(self.campaign_path, evidence,
                                              manifest_path, mapping_path)
-        # Mutate the mate receipt so these field-specific checks are not
-        # preempted by the predecessor binding on the opposite side.
-        receipt_path = evidence / f"{self.candidate_case_id}.baseline.receipt.json"
+        # Mutate the final case's mate receipt so these campaign-wide checks
+        # already have a comparison value and are not preempted by either the
+        # predecessor binding or that receipt's blind-evidence hash.
+        receipt_case = self.campaign["cases"][-1]
+        receipt_side = ("candidate" if receipt_case["first_side"] == "baseline"
+                        else "baseline")
+        receipt_path = evidence / f"{receipt_case['id']}.{receipt_side}.receipt.json"
         receipt = json.loads(receipt_path.read_text())
         receipt["auth_surface"] = "api_key"
         receipt_path.write_text(json.dumps(receipt))
