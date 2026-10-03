@@ -126,7 +126,7 @@ class GeneratorIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        for relative in ("factory/generator/codex_generate.sh", "factory/agent/work_preflight.py",
+        for relative in ("factory/generator/codex_generate.sh", "factory/agent/work_preflight.py", "factory/agent/codex_runtime.py",
                          ".agents/skills/gpt6-work-platform/scripts/work_kernel.py"):
             destination = self.root / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -138,12 +138,12 @@ class GeneratorIntegrationTests(unittest.TestCase):
         (self.root / "runtime/spec.json").write_text(json.dumps({"project_type": "web_app", "ai_task": "dashboard", "entities": {"unique_marker": "UNIQUE_ENTITY_MARKER"}}))
         (self.root / "bin").mkdir()
         stub = self.root / "bin/codex"
-        stub.write_text("#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\nPath(os.environ['CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n")
+        stub.write_text("#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\nif sys.argv[1:] == ['--version']:\n print('codex-cli 0.153.1'); raise SystemExit\nPath(os.environ['CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n")
         stub.chmod(0o755)
         fallback = self.root / "factory/generator/local_fallback.sh"
         fallback.write_text('#!/usr/bin/env bash\ntouch "${FALLBACK_CAPTURE}"\nexit 91\n')
         fallback.chmod(0o755)
-        self.env = dict(os.environ, PATH=str(self.root / "bin") + os.pathsep + os.environ["PATH"],
+        self.env = dict(os.environ, FACTORY_CODEX_PROFILE="legacy", PATH=str(self.root / "bin") + os.pathsep + os.environ["PATH"],
                         CAPTURE=str(self.root / "captured.json"), FALLBACK_CAPTURE=str(self.root / "fallback.called"))
 
     def tearDown(self):
@@ -162,6 +162,27 @@ class GeneratorIntegrationTests(unittest.TestCase):
         self.assertIn('"preflight":"verified_local_snapshot"', argv[-1])
         self.assertEqual(argv[-1].count("UNIQUE_ENTITY_MARKER"), 1)
         self.assertTrue((self.root / "runtime/work-platform/evidence.sqlite3").exists())
+        self.assertFalse((self.root / "fallback.called").exists())
+
+    def test_gpt6_reaches_real_script_command(self):
+        self.env.update(FACTORY_CODEX_PROFILE="gpt6", FACTORY_CODEX_EFFORT="high")
+        result = self.run_generator()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        argv = json.loads((self.root / "captured.json").read_text())
+        self.assertEqual(argv[argv.index("--model") + 1], "gpt-6-astra")
+        self.assertIn('model_reasoning_effort="high"', argv)
+
+    def test_candidate_failure_never_uses_scaffold_fallback(self):
+        self.env.update(FACTORY_CODEX_PROFILE="gpt6", FACTORY_CODEX_EFFORT="high")
+        (self.root / "bin/codex").write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            "if sys.argv[1:] == ['--version']:\n"
+            " print('codex-cli 0.153.1'); raise SystemExit\n"
+            "raise SystemExit(42)\n"
+        )
+        result = self.run_generator()
+        self.assertEqual(result.returncode, 42)
         self.assertFalse((self.root / "fallback.called").exists())
 
     def test_blocked_gate_never_calls_codex_or_fallback(self):

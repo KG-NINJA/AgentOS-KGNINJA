@@ -211,7 +211,7 @@ Project idea:
 $(cat "$target_file")
 EOF
 
-  if codex exec --output-schema "$SCHEMA_FILE" --output-last-message "$RAW_FILE" - < "$PROMPT_FILE" >/dev/null 2>&1; then
+  if python3 "$ROOT/factory/agent/codex_runtime.py" --role interpretation -- exec --output-schema "$SCHEMA_FILE" --output-last-message "$RAW_FILE" - < "$PROMPT_FILE" >/dev/null 2>&1; then
     if python3 - "$RAW_FILE" "$target_file" <<'PY' > "$OUTPUT_FILE"
 import json
 import re
@@ -387,5 +387,9 @@ PY
   fi
 fi
 
+if [ "${FACTORY_CODEX_PROFILE:-legacy}" != "legacy" ]; then
+  echo "fail_reason=gpt6-interpretation-unverified" >&2
+  exit 78
+fi
 write_fallback
 rm -f "$PROMPT_FILE" "$SCHEMA_FILE" "$RAW_FILE"
