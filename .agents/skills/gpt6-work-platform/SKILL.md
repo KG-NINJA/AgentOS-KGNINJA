@@ -69,6 +69,9 @@ version, authentication or inference check.
 Record the validated first-side receipt and raw event-stream hashes in the mate's
 receipt. Recompute that binding before grading and aggregation so later edits to
 the predecessor invalidate the pair.
+Treat observation time as directional evidence: the mate timestamp must not precede
+the campaign-selected first-side timestamp. Compute the pair gap from first side to
+mate rather than using an absolute difference that could hide reversed execution.
 Derive that order deterministically from the frozen source commit, case identifiers
 and prompt hashes. A balanced but manually selected order is not an equivalent
 campaign because it can assign favorable order to chosen cases after inspection.

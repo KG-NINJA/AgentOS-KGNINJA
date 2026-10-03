@@ -29,7 +29,7 @@ from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
                            IncompatibleCodexCli, require_gpt6_cli)  # noqa: E402
 
 SCHEMA = "gpt6-evaluation.v5"
-RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v13"
+RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v14"
 BLIND_SCHEMA = "gpt6-evaluation-blind.v1"
 BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v2"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
@@ -403,11 +403,14 @@ def _validated_completed_evidence(campaign: dict[str, Any], case: dict[str, Any]
             or receipt["provider_model_identity_verified"] is not False
             or receipt["completed"] is not True):
         raise kernel.Rejected("receipt does not match campaign")
+    observed_epoch = _observed_epoch(receipt["observed_at"])
     predecessor_receipt_sha256: str | None = None
     predecessor_event_stream_sha256: str | None = None
     if side != case["first_side"]:
         predecessor, _ = _validated_completed_evidence(
             campaign, case, case["first_side"], evidence_dir)
+        if observed_epoch < _observed_epoch(predecessor["observed_at"]):
+            raise kernel.Rejected("paired observations violate campaign order")
         predecessor_receipt_sha256 = kernel.digest(predecessor)
         predecessor_event_stream_sha256 = predecessor["event_stream_sha256"]
     if (receipt["predecessor_receipt_sha256"] != predecessor_receipt_sha256
@@ -894,7 +897,11 @@ def compile_report(campaign_path: Path, evidence_dir: Path, grades_path: Path,
                           "source_ref": f"{receipt_path}#sha256={kernel.digest(receipt)};{grade['evaluator_ref']}",
                            "prompt_sha256": receipt["prompt_sha256"],
                            "input_sha256": receipt["input_sha256"], "budget_id": receipt["budget_id"]}
-        pair_gap = abs(observed_at["candidate"] - observed_at["baseline"])
+        first_side = case["first_side"]
+        mate_side = "candidate" if first_side == "baseline" else "baseline"
+        if observed_at[mate_side] < observed_at[first_side]:
+            raise kernel.Rejected("paired observations violate campaign order")
+        pair_gap = observed_at[mate_side] - observed_at[first_side]
         if pair_gap > campaign["max_pair_gap_seconds"]:
             raise kernel.Rejected("paired observations exceeded max_pair_gap_seconds")
         max_observed_pair_gap_seconds = max(max_observed_pair_gap_seconds, pair_gap)

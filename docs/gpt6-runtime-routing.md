@@ -178,6 +178,11 @@ under `blocked/`, so an explicit retry cannot erase the earlier diagnosis.
 The checkout is verified again after the model process completes. If its commit or
 contents changed during execution, no success receipt is written and the claim
 remains unresolved for explicit operator reconciliation.
+Receipt schema v14 requires the mate observation timestamp to be no earlier than
+the campaign-selected first-side timestamp. Compilation uses that directed interval,
+not an absolute difference, so reversed observations cannot satisfy the maximum-gap
+gate. Retain v13 receipts as historical evidence rather than reclassifying their
+time ordering under this stronger rule.
 Receipt schema v13 binds every mate run to the exact first-side receipt and raw
 event stream that authorized it. Retain v12 receipts as historical evidence rather
 than inferring this missing predecessor binding after execution.

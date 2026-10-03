@@ -296,6 +296,27 @@ raise SystemExit(99)
             evaluation._validated_completed_evidence(
                 self.campaign, case, "candidate", evidence)
 
+    def test_mate_receipt_observation_must_follow_campaign_first_side(self):
+        for case_id in (self.baseline_case_id, self.candidate_case_id):
+            with self.subTest(case_id=case_id):
+                evidence = self.root / ("evidence-" + case_id)
+                case = evaluation._case(self.campaign, case_id)
+                first_side = case["first_side"]
+                mate_side = "candidate" if first_side == "baseline" else "baseline"
+                evaluation.collect(self.campaign_path, case_id, first_side, self.workspace,
+                                   evidence, 10, str(self.fake))
+                evaluation.collect(self.campaign_path, case_id, mate_side, self.workspace,
+                                   evidence, 10, str(self.fake))
+                mate_path = evidence / f"{case_id}.{mate_side}.receipt.json"
+                mate = evaluation.kernel.load_json(mate_path)
+                mate["observed_at"] = "1970-01-01T00:00:00Z"
+                mate_path.write_bytes(evaluation.kernel.canonical(mate) + b"\n")
+
+                with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                            "paired observations violate campaign order"):
+                    evaluation._validated_completed_evidence(
+                        self.campaign, case, mate_side, evidence)
+
     def test_ignored_workspace_drift_during_execution_is_not_promoted(self):
         evidence = self.root / "evidence"
         real_execute = evaluation.execute

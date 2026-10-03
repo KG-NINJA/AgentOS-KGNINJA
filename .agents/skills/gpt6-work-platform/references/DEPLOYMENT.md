@@ -98,6 +98,9 @@ matching file hash and `completed: true` field alone do not satisfy execution or
 The mate receipt must bind the exact validated first-side receipt and raw
 event-stream hashes. Recompute both before grading and compilation; do not accept
 a pair if its predecessor changed after the mate was authorized.
+The mate observation timestamp must be equal to or later than the selected
+first-side timestamp. Calculate the maximum-gap check in that direction; an
+absolute time difference can conceal a pair executed in the wrong order.
 The order must match the deterministic schedule derived from the frozen source
 commit, case identifiers and prompt hashes; do not hand-pick which model goes first.
 Independent grades must name the exact receipt and raw event-stream hashes they
