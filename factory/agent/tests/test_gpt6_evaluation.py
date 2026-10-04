@@ -268,6 +268,34 @@ raise SystemExit(99)
         version.assert_not_called()
         execute.assert_not_called()
 
+    def test_collect_rejects_mate_runtime_mismatch_before_model_call(self):
+        evidence = self.root / "evidence"
+        case_id = self.baseline_case_id
+        evaluation.collect(self.campaign_path, case_id, "baseline", self.workspace,
+                           evidence, 10, str(self.fake))
+        with mock.patch.object(evaluation, "_codex_version",
+                               return_value="codex-cli 9.9.8"), \
+                mock.patch.object(evaluation, "_codex_auth_surface",
+                                  return_value="chatgpt"), \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "mate Codex CLI version differs from campaign-selected first side"):
+                evaluation.collect(self.campaign_path, case_id, "candidate", self.workspace,
+                                   evidence, 10, str(self.fake))
+        execute.assert_not_called()
+        with mock.patch.object(evaluation, "_codex_version",
+                               return_value="codex-cli 9.9.9"), \
+                mock.patch.object(evaluation, "_codex_auth_surface",
+                                  return_value="api_key"), \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "mate authentication surface differs from campaign-selected first side"):
+                evaluation.collect(self.campaign_path, case_id, "candidate", self.workspace,
+                                   evidence, 10, str(self.fake))
+        execute.assert_not_called()
+
     def test_second_side_receipt_binds_exact_first_side_evidence(self):
         evidence = self.root / "evidence"
         case_id = self.baseline_case_id

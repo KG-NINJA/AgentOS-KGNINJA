@@ -95,6 +95,9 @@ most one), and complete the campaign-selected first side before its mate starts.
 The mate-side preflight must re-validate the first side's exact campaign-bound
 receipt schema and re-derive its strict completed lifecycle from raw JSONL. A
 matching file hash and `completed: true` field alone do not satisfy execution order.
+Before mate inference, compare its current Codex CLI version and coarse
+authentication surface with the validated first-side receipt. Reject either
+mismatch instead of collecting evidence that compilation must later discard.
 The mate receipt must bind the exact validated first-side receipt and raw
 event-stream hashes. Recompute both before grading and compilation; do not accept
 a pair if its predecessor changed after the mate was authorized.

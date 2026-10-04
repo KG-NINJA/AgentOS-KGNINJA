@@ -66,6 +66,10 @@ Before starting the mate, re-validate the selected first side's complete receipt
 schema and strict raw JSONL lifecycle, not only its completed flag or file hash.
 A forged or incomplete first-side receipt must stop before any second-side model
 version, authentication or inference check.
+After validating that evidence, require the mate's current Codex CLI version and
+coarse authentication surface to exactly match the selected first side before
+inference. A condition mismatch is already known to invalidate the pair and must
+not consume a second model call.
 Record the validated first-side receipt and raw event-stream hashes in the mate's
 receipt. Recompute that binding before grading and aggregation so later edits to
 the predecessor invalidate the pair.

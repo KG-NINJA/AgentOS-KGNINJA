@@ -183,6 +183,11 @@ the campaign-selected first-side timestamp. Compilation uses that directed inter
 not an absolute difference, so reversed observations cannot satisfy the maximum-gap
 gate. Retain v13 receipts as historical evidence rather than reclassifying their
 time ordering under this stronger rule.
+After the first side passes that complete evidence validation, mate preflight also
+requires the currently observed Codex CLI version and coarse authentication surface
+to exactly match the first-side receipt. A known condition mismatch is rejected
+before inference rather than spending a call on evidence that final compilation
+must discard. Compilation independently rechecks the same campaign-wide conditions.
 Receipt schema v13 binds every mate run to the exact first-side receipt and raw
 event stream that authorized it. Retain v12 receipts as historical evidence rather
 than inferring this missing predecessor binding after execution.

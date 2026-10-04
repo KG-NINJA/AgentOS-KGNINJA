@@ -210,11 +210,12 @@ def _pair_order(case: dict[str, Any]) -> str:
 
 def _require_first_side_evidence(campaign: dict[str, Any], case: dict[str, Any],
                                  side: str, evidence_dir: Path
-                                 ) -> tuple[str | None, str | None]:
-    """Return the exact first-side evidence hashes that authorize a mate call."""
+                                 ) -> tuple[str | None, str | None,
+                                            str | None, str | None]:
+    """Return the exact first-side evidence and runtime that authorize a mate call."""
     first_side = case["first_side"]
     if side == first_side:
-        return None, None
+        return None, None, None, None
     if evidence_dir.is_symlink():
         raise kernel.Rejected("evidence directory must not be a symlink")
     stem = case["id"] + "." + first_side
@@ -228,7 +229,8 @@ def _require_first_side_evidence(campaign: dict[str, Any], case: dict[str, Any],
             campaign, case, first_side, evidence_dir)
     except (kernel.Rejected, OSError, json.JSONDecodeError, UnicodeError) as exc:
         raise kernel.Rejected("campaign-selected first side evidence is invalid") from exc
-    return kernel.digest(receipt), receipt["event_stream_sha256"]
+    return (kernel.digest(receipt), receipt["event_stream_sha256"],
+            receipt["codex_version"], receipt["auth_surface"])
 
 
 def _observed_epoch(value: Any) -> float:
@@ -545,7 +547,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
         timeout_seconds = campaign["timeout_seconds"]
     elif timeout_seconds != campaign["timeout_seconds"]:
         raise kernel.Rejected("timeout does not match campaign")
-    predecessor_receipt_sha256, predecessor_event_stream_sha256 = \
+    (predecessor_receipt_sha256, predecessor_event_stream_sha256,
+     predecessor_codex_version, predecessor_auth_surface) = \
         _require_first_side_evidence(campaign, case, side, evidence_dir)
     verify_workspace(workspace, campaign["source_commit"])
     model = campaign[side + "_model"]
@@ -553,6 +556,10 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
     auth_surface = _codex_auth_surface(executable)
     if auth_surface not in AUTH_SURFACES:
         raise kernel.Rejected("recognized Codex authentication is required")
+    if predecessor_codex_version is not None and version != predecessor_codex_version:
+        raise kernel.Rejected("mate Codex CLI version differs from campaign-selected first side")
+    if predecessor_auth_surface is not None and auth_surface != predecessor_auth_surface:
+        raise kernel.Rejected("mate authentication surface differs from campaign-selected first side")
     stem = case_id + "." + side
     lock_path = _claim_attempt(evidence_dir, stem)
     resolved = False
