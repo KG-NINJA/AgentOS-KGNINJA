@@ -98,6 +98,8 @@ matching file hash and `completed: true` field alone do not satisfy execution or
 Before mate inference, compare its current Codex CLI version and coarse
 authentication surface with the validated first-side receipt. Reject either
 mismatch instead of collecting evidence that compilation must later discard.
+If the campaign's maximum pair-observation gap has already elapsed since that
+first-side receipt, stop before workspace, CLI, authentication or model checks.
 The mate receipt must bind the exact validated first-side receipt and raw
 event-stream hashes. Recompute both before grading and compilation; do not accept
 a pair if its predecessor changed after the mate was authorized.

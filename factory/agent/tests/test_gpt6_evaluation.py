@@ -296,6 +296,30 @@ raise SystemExit(99)
                                    evidence, 10, str(self.fake))
         execute.assert_not_called()
 
+    def test_collect_rejects_expired_mate_before_runtime_checks(self):
+        evidence = self.root / "evidence"
+        case_id = self.baseline_case_id
+        evaluation.collect(self.campaign_path, case_id, "baseline", self.workspace,
+                           evidence, 10, str(self.fake))
+        receipt = evaluation.kernel.load_json(
+            evidence / f"{case_id}.baseline.receipt.json")
+        expired_now = (evaluation._observed_epoch(receipt["observed_at"])
+                       + self.campaign["max_pair_gap_seconds"] + 1)
+        with mock.patch.object(evaluation.time, "time", return_value=expired_now), \
+                mock.patch.object(evaluation, "verify_workspace") as workspace, \
+                mock.patch.object(evaluation, "_codex_version") as version, \
+                mock.patch.object(evaluation, "_codex_auth_surface") as auth, \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "campaign-selected pair observation window expired"):
+                evaluation.collect(self.campaign_path, case_id, "candidate", self.workspace,
+                                   evidence, 10, str(self.fake))
+        workspace.assert_not_called()
+        version.assert_not_called()
+        auth.assert_not_called()
+        execute.assert_not_called()
+
     def test_second_side_receipt_binds_exact_first_side_evidence(self):
         evidence = self.root / "evidence"
         case_id = self.baseline_case_id

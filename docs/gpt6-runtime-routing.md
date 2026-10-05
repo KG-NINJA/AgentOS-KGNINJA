@@ -188,6 +188,10 @@ requires the currently observed Codex CLI version and coarse authentication surf
 to exactly match the first-side receipt. A known condition mismatch is rejected
 before inference rather than spending a call on evidence that final compilation
 must discard. Compilation independently rechecks the same campaign-wide conditions.
+Mate collection also compares the current UTC time with the validated first-side
+observation. If the frozen maximum pair gap has already elapsed, it stops before
+workspace, CLI, authentication or inference checks. The compiler remains the final
+authority for the exact completed pair timestamps.
 Receipt schema v13 binds every mate run to the exact first-side receipt and raw
 event stream that authorized it. Retain v12 receipts as historical evidence rather
 than inferring this missing predecessor binding after execution.
