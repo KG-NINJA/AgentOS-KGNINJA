@@ -73,6 +73,11 @@ not consume a second model call.
 Also reject the mate before workspace or runtime checks when the campaign-fixed
 observation window has already elapsed since the selected first-side receipt. Do
 not spend a model call on a pair that cannot satisfy compilation.
+Before any model call, atomically bind the whole campaign to one stable Codex CLI
+version and coarse authentication surface. Every later case must match that private,
+campaign-hash-bound runtime lock before inference. For legacy evidence without the
+lock, recover the binding from every completed receipt and stop on any pre-existing
+mixture; never overwrite a corrupt or partial lock without explicit reconciliation.
 Record the validated first-side receipt and raw event-stream hashes in the mate's
 receipt. Recompute that binding before grading and aggregation so later edits to
 the predecessor invalidate the pair.

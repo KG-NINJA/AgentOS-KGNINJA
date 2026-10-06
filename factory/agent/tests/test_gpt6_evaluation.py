@@ -226,6 +226,62 @@ raise SystemExit(99)
         self.assertEqual(os.stat(evidence).st_mode & 0o777, 0o700)
         receipt_path = evidence / f"{self.candidate_case_id}.candidate.receipt.json"
         self.assertEqual(os.stat(receipt_path).st_mode & 0o777, 0o600)
+        runtime_path = evidence / "campaign-runtime.json"
+        self.assertEqual(os.stat(runtime_path).st_mode & 0o777, 0o600)
+        self.assertEqual(evaluation.kernel.load_json(runtime_path), {
+            "schema_version": evaluation.RUNTIME_LOCK_SCHEMA,
+            "campaign_sha256": evaluation.kernel.digest(self.campaign),
+            "codex_version": "codex-cli 9.9.9",
+            "auth_surface": "chatgpt",
+        })
+
+    def test_collect_rejects_cross_case_runtime_drift_before_model_call(self):
+        evidence = self.root / "evidence"
+        evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate",
+                           self.workspace, evidence, 10, str(self.fake))
+        other = next(case for case in self.campaign["cases"]
+                     if case["id"] != self.candidate_case_id)
+        with mock.patch.object(evaluation, "_codex_version",
+                               return_value="codex-cli 9.9.8"), \
+                mock.patch.object(evaluation, "_codex_auth_surface",
+                                  return_value="chatgpt"), \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "campaign Codex CLI version differs from (runtime lock|completed evidence)"):
+                evaluation.collect(self.campaign_path, other["id"], other["first_side"],
+                                   self.workspace, evidence, 10, str(self.fake))
+        execute.assert_not_called()
+        with mock.patch.object(evaluation, "_codex_version",
+                               return_value="codex-cli 9.9.9"), \
+                mock.patch.object(evaluation, "_codex_auth_surface",
+                                  return_value="api_key"), \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "campaign authentication surface differs from (runtime lock|completed evidence)"):
+                evaluation.collect(self.campaign_path, other["id"], other["first_side"],
+                                   self.workspace, evidence, 10, str(self.fake))
+        execute.assert_not_called()
+
+    def test_runtime_lock_recovers_legacy_completed_campaign_conditions(self):
+        evidence = self.root / "evidence"
+        evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate",
+                           self.workspace, evidence, 10, str(self.fake))
+        (evidence / "campaign-runtime.json").unlink()
+        other = next(case for case in self.campaign["cases"]
+                     if case["id"] != self.candidate_case_id)
+        with mock.patch.object(evaluation, "_codex_version",
+                               return_value="codex-cli 9.9.8"), \
+                mock.patch.object(evaluation, "_codex_auth_surface",
+                                  return_value="chatgpt"), \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                        "differs from completed evidence"):
+                evaluation.collect(self.campaign_path, other["id"], other["first_side"],
+                                   self.workspace, evidence, 10, str(self.fake))
+        execute.assert_not_called()
+        self.assertFalse((evidence / "campaign-runtime.json").exists())
 
     def test_collect_rejects_timeout_mismatch_before_model_call(self):
         with mock.patch.object(evaluation, "_codex_version") as version, \
@@ -603,8 +659,12 @@ raise SystemExit(23)
         for case in self.campaign["cases"]:
             second_side = "candidate" if case["first_side"] == "baseline" else "baseline"
             for side in (case["first_side"], second_side):
-                evaluation.collect(self.campaign_path, case["id"], side, self.workspace,
-                                   evidence, 10, str(self.fake))
+                result = evaluation.collect(self.campaign_path, case["id"], side,
+                                            self.workspace, evidence, 10, str(self.fake))
+                receipt_path = Path(result["receipt_path"])
+                receipt = evaluation.kernel.load_json(receipt_path)
+                receipt["latency_ms"] = 1.0
+                receipt_path.write_bytes(evaluation.kernel.canonical(receipt) + b"\n")
         manifest_path, mapping_path, grade_path, grades, manifest = prepare_grades(
             self.root, self.campaign_path, evidence)
         manifest_text = manifest_path.read_text()

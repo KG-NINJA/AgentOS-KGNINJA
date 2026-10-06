@@ -100,6 +100,12 @@ authentication surface with the validated first-side receipt. Reject either
 mismatch instead of collecting evidence that compilation must later discard.
 If the campaign's maximum pair-observation gap has already elapsed since that
 first-side receipt, stop before workspace, CLI, authentication or model checks.
+Atomically create a private `campaign-runtime.json` before the first inference and
+bind it to the campaign hash, stable Codex CLI version and coarse authentication
+surface. Reject every later case before inference if either runtime condition
+changes. If completed legacy evidence predates the lock, derive the initial binding
+from all completed receipts and reject an already mixed campaign. A corrupt,
+partial or non-private lock requires explicit reconciliation and is never replaced.
 The mate receipt must bind the exact validated first-side receipt and raw
 event-stream hashes. Recompute both before grading and compilation; do not accept
 a pair if its predecessor changed after the mate was authorized.

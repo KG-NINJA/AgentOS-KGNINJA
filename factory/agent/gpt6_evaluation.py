@@ -30,6 +30,7 @@ from codex_runtime import (CODEX_VERSION, MIN_GPT6_CODEX_VERSION,
 
 SCHEMA = "gpt6-evaluation.v5"
 RECEIPT_SCHEMA = "gpt6-evaluation-receipt.v14"
+RUNTIME_LOCK_SCHEMA = "gpt6-campaign-runtime.v1"
 BLIND_SCHEMA = "gpt6-evaluation-blind.v1"
 BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v2"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
@@ -88,6 +89,26 @@ def _write_private_bytes(path: Path, payload: bytes) -> None:
 
 def _write_private(path: Path, value: dict[str, Any]) -> None:
     _write_private_bytes(path, kernel.canonical(value) + b"\n")
+
+
+def _publish_private_exclusive(path: Path, value: dict[str, Any]) -> bool:
+    """Publish one complete private JSON file without replacing a winner."""
+    _ensure_private_directory(path.parent)
+    payload = kernel.canonical(value) + b"\n"
+    descriptor, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary, path, follow_symlinks=False)
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def _claim_attempt(evidence_dir: Path, stem: str) -> Path:
@@ -431,6 +452,98 @@ def _validated_completed_evidence(campaign: dict[str, Any], case: dict[str, Any]
     return receipt, final_message
 
 
+def _completed_campaign_runtime(campaign: dict[str, Any], evidence_dir: Path
+                                ) -> tuple[str | None, str | None]:
+    """Recover a campaign runtime from completed evidence created before locking."""
+    version: str | None = None
+    auth_surface: str | None = None
+    for case in campaign["cases"]:
+        for side in ("baseline", "candidate"):
+            stem = f"{case['id']}.{side}"
+            raw_path = evidence_dir / (stem + ".jsonl")
+            receipt_path = evidence_dir / (stem + ".receipt.json")
+            raw_present = raw_path.exists() or raw_path.is_symlink()
+            receipt_present = receipt_path.exists() or receipt_path.is_symlink()
+            if raw_present != receipt_present:
+                raise kernel.Rejected("partial completed evidence requires reconciliation")
+            if not raw_present:
+                continue
+            receipt, _ = _validated_completed_evidence(
+                campaign, case, side, evidence_dir)
+            receipt_version = _validated_codex_version(receipt["codex_version"])
+            if version is None:
+                version = receipt_version
+                auth_surface = receipt["auth_surface"]
+            elif receipt_version != version:
+                raise kernel.Rejected("completed campaign evidence has mixed Codex CLI versions")
+            elif receipt["auth_surface"] != auth_surface:
+                raise kernel.Rejected("completed campaign evidence has mixed authentication surfaces")
+    return version, auth_surface
+
+
+def _load_campaign_runtime_lock(campaign: dict[str, Any], lock_path: Path
+                                ) -> dict[str, Any]:
+    expected = {"schema_version", "campaign_sha256", "codex_version", "auth_surface"}
+    if lock_path.is_symlink() or not lock_path.is_file():
+        raise kernel.Rejected("campaign runtime lock path is invalid")
+    if lock_path.stat().st_mode & 0o077:
+        raise kernel.Rejected("campaign runtime lock is not private")
+    locked = kernel.load_json(lock_path)
+    if (type(locked) is not dict or set(locked) != expected
+            or locked["schema_version"] != RUNTIME_LOCK_SCHEMA
+            or locked["campaign_sha256"] != kernel.digest(campaign)
+            or locked["auth_surface"] not in AUTH_SURFACES):
+        raise kernel.Rejected("campaign runtime lock is invalid")
+    _validated_codex_version(locked["codex_version"])
+    return locked
+
+
+def _bind_campaign_runtime(campaign: dict[str, Any], evidence_dir: Path,
+                           version: str, auth_surface: str) -> None:
+    """Atomically bind all model calls in one campaign to one runtime surface."""
+    version = _validated_codex_version(version)
+    if auth_surface not in AUTH_SURFACES:
+        raise kernel.Rejected("recognized Codex authentication is required")
+    _ensure_private_directory(evidence_dir)
+    lock_path = evidence_dir / "campaign-runtime.json"
+    if lock_path.exists() or lock_path.is_symlink():
+        locked = _load_campaign_runtime_lock(campaign, lock_path)
+        if locked["codex_version"] != version:
+            raise kernel.Rejected("campaign Codex CLI version differs from runtime lock")
+        if locked["auth_surface"] != auth_surface:
+            raise kernel.Rejected("campaign authentication surface differs from runtime lock")
+        completed_version, completed_auth_surface = _completed_campaign_runtime(
+            campaign, evidence_dir)
+        if (completed_version is not None
+                and completed_version != locked["codex_version"]):
+            raise kernel.Rejected("completed evidence differs from campaign runtime lock")
+        if (completed_auth_surface is not None
+                and completed_auth_surface != locked["auth_surface"]):
+            raise kernel.Rejected("completed evidence differs from campaign runtime lock")
+        return
+
+    legacy_version, legacy_auth_surface = _completed_campaign_runtime(
+        campaign, evidence_dir)
+    if legacy_version is not None and version != legacy_version:
+        raise kernel.Rejected("campaign Codex CLI version differs from completed evidence")
+    if legacy_auth_surface is not None and auth_surface != legacy_auth_surface:
+        raise kernel.Rejected("campaign authentication surface differs from completed evidence")
+
+    runtime = {
+        "schema_version": RUNTIME_LOCK_SCHEMA,
+        "campaign_sha256": kernel.digest(campaign),
+        "codex_version": legacy_version or version,
+        "auth_surface": legacy_auth_surface or auth_surface,
+    }
+    if _publish_private_exclusive(lock_path, runtime):
+        return
+    locked = _load_campaign_runtime_lock(campaign, lock_path)
+    if locked["codex_version"] != version:
+        raise kernel.Rejected("campaign Codex CLI version differs from runtime lock")
+    if locked["auth_surface"] != auth_surface:
+        raise kernel.Rejected("campaign authentication surface differs from runtime lock")
+
+
 def _partial_event_summary(raw: bytes) -> dict[str, Any]:
     """Summarize complete JSONL records without exposing event payloads."""
     event_types: list[str] = []
@@ -566,6 +679,7 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
         raise kernel.Rejected("mate Codex CLI version differs from campaign-selected first side")
     if predecessor_auth_surface is not None and auth_surface != predecessor_auth_surface:
         raise kernel.Rejected("mate authentication surface differs from campaign-selected first side")
+    _bind_campaign_runtime(campaign, evidence_dir, version, auth_surface)
     stem = case_id + "." + side
     lock_path = _claim_attempt(evidence_dir, stem)
     resolved = False

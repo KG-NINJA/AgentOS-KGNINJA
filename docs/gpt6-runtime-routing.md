@@ -54,6 +54,14 @@ mixed surfaces cannot become a matched comparison. Workload identity requires a
 separate reviewed integration because the CLI rejects login management commands
 when that environment-controlled method is active.
 
+Before inference, the collector atomically creates private
+`campaign-runtime.json`, bound to the campaign hash, Codex CLI version and coarse
+authentication surface. Every later case must match it before a model call. For a
+pre-lock campaign, completed receipts establish the binding; mixed legacy evidence,
+a corrupt lock or a non-private lock stops for explicit reconciliation rather than
+being silently replaced. This private campaign artifact does not change receipt
+schema v14.
+
 Candidate generation failures do not fall back to successful local scaffolding.
 Candidate interpretation failures cannot become successful heuristic output.
 Candidate repair failures/timeouts cannot retry through another backend. Daemon
