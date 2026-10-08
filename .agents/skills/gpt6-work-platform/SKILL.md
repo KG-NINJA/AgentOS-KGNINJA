@@ -78,6 +78,10 @@ version and coarse authentication surface. Every later case must match that priv
 campaign-hash-bound runtime lock before inference. For legacy evidence without the
 lock, recover the binding from every completed receipt and stop on any pre-existing
 mixture; never overwrite a corrupt or partial lock without explicit reconciliation.
+After every completed model call, re-check the CLI version, authentication surface
+and private campaign lock before promoting its output. A mid-call update, logout,
+authentication switch or lock mutation leaves the attempt unresolved for explicit
+reconciliation; it is not comparable success evidence.
 Record the validated first-side receipt and raw event-stream hashes in the mate's
 receipt. Recompute that binding before grading and aggregation so later edits to
 the predecessor invalidate the pair.

@@ -106,6 +106,10 @@ surface. Reject every later case before inference if either runtime condition
 changes. If completed legacy evidence predates the lock, derive the initial binding
 from all completed receipts and reject an already mixed campaign. A corrupt,
 partial or non-private lock requires explicit reconciliation and is never replaced.
+Immediately after a completed inference, re-run the stable CLI and coarse
+authentication checks and re-read the campaign lock before writing success
+evidence. If any of those conditions changed during the call, retain the attempt
+claim for reconciliation and do not promote its output into the campaign.
 The mate receipt must bind the exact validated first-side receipt and raw
 event-stream hashes. Recompute both before grading and compilation; do not accept
 a pair if its predecessor changed after the mate was authorized.

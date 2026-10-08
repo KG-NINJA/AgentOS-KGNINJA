@@ -283,6 +283,62 @@ raise SystemExit(99)
         execute.assert_not_called()
         self.assertFalse((evidence / "campaign-runtime.json").exists())
 
+    def test_collect_rejects_cli_change_during_model_call(self):
+        evidence = self.root / "evidence"
+        with mock.patch.object(evaluation, "_codex_version",
+                               side_effect=["codex-cli 9.9.9", "codex-cli 9.9.8"]), \
+                mock.patch.object(evaluation, "_codex_auth_surface",
+                                  return_value="chatgpt"), \
+                mock.patch.object(evaluation, "execute",
+                                  wraps=evaluation.execute) as execute:
+            with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                        "CLI version changed during model execution"):
+                evaluation.collect(self.campaign_path, self.candidate_case_id,
+                                   "candidate", self.workspace, evidence, 10,
+                                   str(self.fake))
+        execute.assert_called_once()
+        self.assertFalse((evidence / f"{self.candidate_case_id}.candidate.jsonl").exists())
+        self.assertFalse((evidence / f"{self.candidate_case_id}.candidate.receipt.json").exists())
+        self.assertTrue((evidence / f".{self.candidate_case_id}.candidate.lock").exists())
+
+    def test_collect_rejects_auth_change_during_model_call(self):
+        evidence = self.root / "evidence"
+        with mock.patch.object(evaluation, "_codex_version",
+                               return_value="codex-cli 9.9.9"), \
+                mock.patch.object(evaluation, "_codex_auth_surface",
+                                  side_effect=["chatgpt", "api_key"]), \
+                mock.patch.object(evaluation, "execute",
+                                  wraps=evaluation.execute) as execute:
+            with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                        "authentication surface changed during model execution"):
+                evaluation.collect(self.campaign_path, self.candidate_case_id,
+                                   "candidate", self.workspace, evidence, 10,
+                                   str(self.fake))
+        execute.assert_called_once()
+        self.assertFalse((evidence / f"{self.candidate_case_id}.candidate.jsonl").exists())
+        self.assertFalse((evidence / f"{self.candidate_case_id}.candidate.receipt.json").exists())
+        self.assertTrue((evidence / f".{self.candidate_case_id}.candidate.lock").exists())
+
+    def test_collect_rejects_runtime_lock_change_during_model_call(self):
+        evidence = self.root / "evidence"
+        original_execute = evaluation.execute
+
+        def mutate_lock(*args, **kwargs):
+            result = original_execute(*args, **kwargs)
+            (evidence / "campaign-runtime.json").chmod(0o644)
+            return result
+
+        with mock.patch.object(evaluation, "execute", side_effect=mutate_lock) as execute:
+            with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                        "runtime lock is not private"):
+                evaluation.collect(self.campaign_path, self.candidate_case_id,
+                                   "candidate", self.workspace, evidence, 10,
+                                   str(self.fake))
+        execute.assert_called_once()
+        self.assertFalse((evidence / f"{self.candidate_case_id}.candidate.jsonl").exists())
+        self.assertFalse((evidence / f"{self.candidate_case_id}.candidate.receipt.json").exists())
+        self.assertTrue((evidence / f".{self.candidate_case_id}.candidate.lock").exists())
+
     def test_collect_rejects_timeout_mismatch_before_model_call(self):
         with mock.patch.object(evaluation, "_codex_version") as version, \
                 mock.patch.object(evaluation, "execute") as execute:

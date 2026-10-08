@@ -544,6 +544,23 @@ def _bind_campaign_runtime(campaign: dict[str, Any], evidence_dir: Path,
         raise kernel.Rejected("campaign authentication surface differs from runtime lock")
 
 
+def _revalidate_campaign_runtime_after_execution(
+        campaign: dict[str, Any], evidence_dir: Path, executable: str,
+        version: str, auth_surface: str) -> None:
+    """Fail closed when the CLI or auth surface changes during one model call."""
+    completed_version = _codex_version(executable)
+    completed_auth_surface = _codex_auth_surface(executable)
+    if completed_version != version:
+        raise kernel.Rejected("Codex CLI version changed during model execution")
+    if completed_auth_surface != auth_surface:
+        raise kernel.Rejected("authentication surface changed during model execution")
+    # Re-read the private lock after the call too. This catches replacement,
+    # deletion, permission drift and newly conflicting completed evidence before
+    # the current output can be promoted to campaign evidence.
+    _bind_campaign_runtime(campaign, evidence_dir, completed_version,
+                           completed_auth_surface)
+
+
 def _partial_event_summary(raw: bytes) -> dict[str, Any]:
     """Summarize complete JSONL records without exposing event payloads."""
     event_types: list[str] = []
@@ -724,6 +741,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
             exc.stderr_path = str(stderr_path) if stderr_stored else None
             resolved = True
             raise
+        _revalidate_campaign_runtime_after_execution(
+            campaign, evidence_dir, executable, version, auth_surface)
         # A concurrent local mutation can change what the read-only model saw.
         # Recheck after completion before promoting the output to success evidence.
         verify_workspace(workspace, campaign["source_commit"])

@@ -61,6 +61,10 @@ pre-lock campaign, completed receipts establish the binding; mixed legacy eviden
 a corrupt lock or a non-private lock stops for explicit reconciliation rather than
 being silently replaced. This private campaign artifact does not change receipt
 schema v14.
+Each completed call repeats the CLI-version and authentication checks and reloads
+that lock before its output is promoted. A CLI update, logout/authentication switch
+or lock mutation during inference leaves the per-case attempt claimed for explicit
+reconciliation instead of creating comparable success evidence.
 
 Candidate generation failures do not fall back to successful local scaffolding.
 Candidate interpretation failures cannot become successful heuristic output.
