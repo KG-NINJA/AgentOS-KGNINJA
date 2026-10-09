@@ -110,6 +110,9 @@ Immediately after a completed inference, re-run the stable CLI and coarse
 authentication checks and re-read the campaign lock before writing success
 evidence. If any of those conditions changed during the call, retain the attempt
 claim for reconciliation and do not promote its output into the campaign.
+The preliminary single-model access probe must likewise re-run the stable CLI and
+coarse authentication checks after completion. Treat a mid-probe version or
+authentication change as blocked rather than recording successful access.
 The mate receipt must bind the exact validated first-side receipt and raw
 event-stream hashes. Recompute both before grading and compilation; do not accept
 a pair if its predecessor changed after the mate was authorized.

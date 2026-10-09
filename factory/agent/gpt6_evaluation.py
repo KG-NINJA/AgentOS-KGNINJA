@@ -544,9 +544,8 @@ def _bind_campaign_runtime(campaign: dict[str, Any], evidence_dir: Path,
         raise kernel.Rejected("campaign authentication surface differs from runtime lock")
 
 
-def _revalidate_campaign_runtime_after_execution(
-        campaign: dict[str, Any], evidence_dir: Path, executable: str,
-        version: str, auth_surface: str) -> None:
+def _revalidate_runtime_surface_after_execution(
+        executable: str, version: str, auth_surface: str) -> None:
     """Fail closed when the CLI or auth surface changes during one model call."""
     completed_version = _codex_version(executable)
     completed_auth_surface = _codex_auth_surface(executable)
@@ -554,11 +553,17 @@ def _revalidate_campaign_runtime_after_execution(
         raise kernel.Rejected("Codex CLI version changed during model execution")
     if completed_auth_surface != auth_surface:
         raise kernel.Rejected("authentication surface changed during model execution")
+
+
+def _revalidate_campaign_runtime_after_execution(
+        campaign: dict[str, Any], evidence_dir: Path, executable: str,
+        version: str, auth_surface: str) -> None:
+    """Recheck the runtime surface and campaign lock after one model call."""
+    _revalidate_runtime_surface_after_execution(executable, version, auth_surface)
     # Re-read the private lock after the call too. This catches replacement,
     # deletion, permission drift and newly conflicting completed evidence before
     # the current output can be promoted to campaign evidence.
-    _bind_campaign_runtime(campaign, evidence_dir, completed_version,
-                           completed_auth_surface)
+    _bind_campaign_runtime(campaign, evidence_dir, version, auth_surface)
 
 
 def _partial_event_summary(raw: bytes) -> dict[str, Any]:
@@ -784,6 +789,7 @@ def probe(effort: str, workspace: Path, timeout_seconds: int,
         exc.summary["codex_version"] = version
         exc.summary["auth_surface"] = auth_surface
         raise
+    _revalidate_runtime_surface_after_execution(executable, version, auth_surface)
     if summary["final_message_sha256"] != _sha_bytes(b"GPT6_ACCESS_PROBE_OK"):
         raise kernel.Rejected("Codex probe response mismatch")
     return {"schema_version": "gpt6-access-probe.v2", "requested_model": "gpt-6-astra",

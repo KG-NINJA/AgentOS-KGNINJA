@@ -82,6 +82,9 @@ After every completed model call, re-check the CLI version, authentication surfa
 and private campaign lock before promoting its output. A mid-call update, logout,
 authentication switch or lock mutation leaves the attempt unresolved for explicit
 reconciliation; it is not comparable success evidence.
+Apply the same post-call CLI-version and authentication-surface recheck to the
+single GPT-6 access probe. A probe that completed across a runtime change is not
+valid access evidence even though it is not yet part of a comparison campaign.
 Record the validated first-side receipt and raw event-stream hashes in the mate's
 receipt. Recompute that binding before grading and aggregation so later edits to
 the predecessor invalidate the pair.

@@ -212,10 +212,36 @@ raise SystemExit(99)
         with mock.patch.object(evaluation.subprocess, "run",
                                wraps=evaluation.subprocess.run) as run:
             evaluation.probe("high", self.workspace, 10, str(self.fake))
-        self.assertEqual(len(run.call_args_list), 3)
+        self.assertEqual(len(run.call_args_list), 5)
         self.assertIs(run.call_args_list[0].kwargs["stdin"], subprocess.DEVNULL)
         self.assertIs(run.call_args_list[1].kwargs["stdin"], subprocess.DEVNULL)
         self.assertIsInstance(run.call_args_list[2].kwargs["stdin"], int)
+        self.assertIs(run.call_args_list[3].kwargs["stdin"], subprocess.DEVNULL)
+        self.assertIs(run.call_args_list[4].kwargs["stdin"], subprocess.DEVNULL)
+
+    def test_probe_rejects_cli_change_during_model_call(self):
+        with mock.patch.object(evaluation, "_codex_version",
+                               side_effect=["codex-cli 9.9.9", "codex-cli 9.9.8"]), \
+                mock.patch.object(evaluation, "_codex_auth_surface",
+                                  return_value="chatgpt"), \
+                mock.patch.object(evaluation, "execute",
+                                  wraps=evaluation.execute) as execute:
+            with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                        "CLI version changed during model execution"):
+                evaluation.probe("high", self.workspace, 10, str(self.fake))
+        execute.assert_called_once()
+
+    def test_probe_rejects_auth_change_during_model_call(self):
+        with mock.patch.object(evaluation, "_codex_version",
+                               return_value="codex-cli 9.9.9"), \
+                mock.patch.object(evaluation, "_codex_auth_surface",
+                                  side_effect=["chatgpt", "api_key"]), \
+                mock.patch.object(evaluation, "execute",
+                                  wraps=evaluation.execute) as execute:
+            with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                        "authentication surface changed during model execution"):
+                evaluation.probe("high", self.workspace, 10, str(self.fake))
+        execute.assert_called_once()
 
     def test_collect_uses_frozen_pair_and_private_files(self):
         evidence = self.root / "evidence"
