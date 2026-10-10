@@ -622,7 +622,7 @@ def _blocked_summary(reason: str, model: str, effort: str, timeout_seconds: int,
 
 
 def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_seconds: int,
-            executable: str = "codex") -> tuple[dict[str, Any], bytes]:
+            executable: str = "codex") -> tuple[dict[str, Any], bytes, bytes]:
     if effort not in ("low", "medium", "high", "xhigh", "max"):
         raise kernel.Rejected("unsupported effort")
     if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 3600:
@@ -669,7 +669,7 @@ def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_secon
         raise CodexRunBlocked(summary, raw_stdout, raw_stderr)
     summary = {"completed": True, "latency_ms": latency_ms, **completion}
     kernel.canonical(summary)
-    return summary, raw_stdout
+    return summary, raw_stdout, raw_stderr
 
 
 def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
@@ -707,8 +707,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
     resolved = False
     try:
         try:
-            summary, raw = execute(model, campaign["effort"], case["prompt"], workspace,
-                                   timeout_seconds, executable)
+            summary, raw, _ = execute(model, campaign["effort"], case["prompt"], workspace,
+                                      timeout_seconds, executable)
         except CodexRunBlocked as exc:
             attempt_dir = _blocked_attempt_dir(evidence_dir, stem)
             raw_path = attempt_dir / "stdout.jsonl"
@@ -783,19 +783,35 @@ def probe(effort: str, workspace: Path, timeout_seconds: int,
     if auth_surface not in AUTH_SURFACES:
         raise kernel.Rejected("recognized Codex authentication is required")
     try:
-        summary, _ = execute("gpt-6-astra", effort, PROBE_PROMPT, workspace,
-                             timeout_seconds, executable)
+        summary, raw_stdout, raw_stderr = execute(
+            "gpt-6-astra", effort, PROBE_PROMPT, workspace,
+            timeout_seconds, executable)
     except CodexRunBlocked as exc:
         exc.summary["codex_version"] = version
         exc.summary["auth_surface"] = auth_surface
         raise
-    _revalidate_runtime_surface_after_execution(executable, version, auth_surface)
+    try:
+        _revalidate_runtime_surface_after_execution(executable, version, auth_surface)
+    except (kernel.Rejected, IncompatibleCodexCli, OSError,
+            subprocess.SubprocessError) as exc:
+        blocked = _blocked_summary(
+            "runtime-surface-changed-after-completion", "gpt-6-astra", effort,
+            timeout_seconds, summary["latency_ms"], raw_stdout, raw_stderr, 0)
+        blocked.update({"codex_version": version, "auth_surface": auth_surface,
+                        "model_call_process_completed": True})
+        raise CodexRunBlocked(blocked, raw_stdout, raw_stderr) from exc
     if summary["final_message_sha256"] != _sha_bytes(b"GPT6_ACCESS_PROBE_OK"):
-        raise kernel.Rejected("Codex probe response mismatch")
-    return {"schema_version": "gpt6-access-probe.v2", "requested_model": "gpt-6-astra",
+        blocked = _blocked_summary(
+            "probe-response-mismatch", "gpt-6-astra", effort, timeout_seconds,
+            summary["latency_ms"], raw_stdout, raw_stderr, 0)
+        blocked.update({"codex_version": version, "auth_surface": auth_surface,
+                        "model_call_process_completed": True})
+        raise CodexRunBlocked(blocked, raw_stdout, raw_stderr)
+    return {"schema_version": "gpt6-access-probe.v3", "requested_model": "gpt-6-astra",
             "requested_effort": effort, "codex_version": version,
             "auth_surface": auth_surface,
             "requested_model_call_completed": True,
+            "access_probe_validated": True,
             "provider_model_identity_verified": False,
             "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **summary}
 
@@ -1142,9 +1158,11 @@ def main() -> int:
             stderr_stored = len(exc.raw_stderr) <= MAX_EVENT_STREAM_BYTES
             receipt = {
                 **exc.summary,
-                "schema_version": "gpt6-access-probe-blocked.v2",
+                "schema_version": "gpt6-access-probe-blocked.v3",
                 "provider_model_identity_verified": False,
-                "requested_model_call_completed": False,
+                "requested_model_call_completed": bool(
+                    exc.summary.get("model_call_process_completed", False)),
+                "access_probe_validated": False,
                 "partial_stdout_stored": raw_stored,
                 "private_stderr_stored": stderr_stored,
                 "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

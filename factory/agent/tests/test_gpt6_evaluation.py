@@ -151,6 +151,7 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
     def test_probe_records_requested_not_verified_model(self):
         result = evaluation.probe("high", self.workspace, 10, str(self.fake))
         self.assertTrue(result["requested_model_call_completed"])
+        self.assertTrue(result["access_probe_validated"])
         self.assertEqual(result["requested_model"], "gpt-6-astra")
         self.assertEqual(result["auth_surface"], "chatgpt")
         self.assertFalse(result["provider_model_identity_verified"])
@@ -226,10 +227,13 @@ raise SystemExit(99)
                                   return_value="chatgpt"), \
                 mock.patch.object(evaluation, "execute",
                                   wraps=evaluation.execute) as execute:
-            with self.assertRaisesRegex(evaluation.kernel.Rejected,
-                                        "CLI version changed during model execution"):
+            with self.assertRaises(evaluation.CodexRunBlocked) as raised:
                 evaluation.probe("high", self.workspace, 10, str(self.fake))
         execute.assert_called_once()
+        self.assertEqual(raised.exception.summary["reason"],
+                         "runtime-surface-changed-after-completion")
+        self.assertTrue(raised.exception.summary["model_call_process_completed"])
+        self.assertTrue(raised.exception.raw_stdout)
 
     def test_probe_rejects_auth_change_during_model_call(self):
         with mock.patch.object(evaluation, "_codex_version",
@@ -238,10 +242,30 @@ raise SystemExit(99)
                                   side_effect=["chatgpt", "api_key"]), \
                 mock.patch.object(evaluation, "execute",
                                   wraps=evaluation.execute) as execute:
-            with self.assertRaisesRegex(evaluation.kernel.Rejected,
-                                        "authentication surface changed during model execution"):
+            with self.assertRaises(evaluation.CodexRunBlocked) as raised:
                 evaluation.probe("high", self.workspace, 10, str(self.fake))
         execute.assert_called_once()
+        self.assertEqual(raised.exception.summary["reason"],
+                         "runtime-surface-changed-after-completion")
+        self.assertTrue(raised.exception.summary["model_call_process_completed"])
+
+    def test_probe_preserves_completed_mismatched_response_as_blocked_evidence(self):
+        raw = b'private completed response\n'
+        stderr = b'private diagnostic\n'
+        completed = {"completed": True, "latency_ms": 12.5,
+                     "final_message_sha256": evaluation._sha_bytes(b"unexpected")}
+        with mock.patch.object(evaluation, "_codex_version",
+                               return_value="codex-cli 9.9.9"), \
+                mock.patch.object(evaluation, "_codex_auth_surface",
+                                  return_value="chatgpt"), \
+                mock.patch.object(evaluation, "execute",
+                                  return_value=(completed, raw, stderr)):
+            with self.assertRaises(evaluation.CodexRunBlocked) as raised:
+                evaluation.probe("high", self.workspace, 10, str(self.fake))
+        self.assertEqual(raised.exception.summary["reason"], "probe-response-mismatch")
+        self.assertTrue(raised.exception.summary["model_call_process_completed"])
+        self.assertEqual(raised.exception.raw_stdout, raw)
+        self.assertEqual(raised.exception.raw_stderr, stderr)
 
     def test_collect_uses_frozen_pair_and_private_files(self):
         evidence = self.root / "evidence"
@@ -731,10 +755,46 @@ raise SystemExit(23)
             self.assertEqual(evaluation.main(), 2)
         public = json.loads(stdout.getvalue())
         self.assertFalse(public["requested_model_call_completed"])
+        self.assertFalse(public["access_probe_validated"])
         self.assertNotIn("private-thread", stdout.getvalue())
         self.assertIn("private-thread", output.with_name("probe.blocked.jsonl").read_text())
         self.assertEqual(output.with_name("probe.blocked.stderr").read_bytes(), b"")
         self.assertEqual(os.stat(output).st_mode & 0o777, 0o600)
+
+    def test_probe_cli_marks_completed_runtime_drift_as_unvalidated(self):
+        raw = b'private completed stream\n'
+        stderr = b'private diagnostic\n'
+        summary = {
+            "schema_version": evaluation.BLOCKED_SCHEMA,
+            "status": "blocked",
+            "reason": "runtime-surface-changed-after-completion",
+            "requested_model": "gpt-6-astra",
+            "requested_effort": "high",
+            "timeout_seconds": 10,
+            "latency_ms": 12.5,
+            "process_returncode": 0,
+            "stdout_bytes": len(raw),
+            "stdout_sha256": evaluation._sha_bytes(raw),
+            "stderr_bytes": len(stderr),
+            "stderr_sha256": evaluation._sha_bytes(stderr),
+            "model_call_process_completed": True,
+            **evaluation._partial_event_summary(raw),
+        }
+        blocked = evaluation.CodexRunBlocked(summary, raw, stderr)
+        output = self.root / "drift-probe.json"
+        stdout = io.StringIO()
+        argv = ["gpt6_evaluation.py", "probe", "--effort", "high",
+                "--timeout-seconds", "10", "--output", str(output)]
+        with mock.patch.object(evaluation, "probe", side_effect=blocked), \
+                mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(stdout):
+            self.assertEqual(evaluation.main(), 2)
+        public = json.loads(stdout.getvalue())
+        self.assertTrue(public["requested_model_call_completed"])
+        self.assertFalse(public["access_probe_validated"])
+        self.assertFalse(public["provider_model_identity_verified"])
+        self.assertNotIn("private completed stream", stdout.getvalue())
+        self.assertEqual(output.with_name("drift-probe.blocked.jsonl").read_bytes(), raw)
+        self.assertEqual(output.with_name("drift-probe.blocked.stderr").read_bytes(), stderr)
 
     def test_compile_requires_separate_complete_grades(self):
         evidence = self.root / "evidence"

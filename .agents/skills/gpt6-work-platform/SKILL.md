@@ -85,6 +85,10 @@ reconciliation; it is not comparable success evidence.
 Apply the same post-call CLI-version and authentication-surface recheck to the
 single GPT-6 access probe. A probe that completed across a runtime change is not
 valid access evidence even though it is not yet part of a comparison campaign.
+Retain its bounded stdout/stderr privately with a blocked receipt, as for other
+failed probes; also retain a completed response that does not match the fixed
+probe sentinel. Neither condition is validated model access, and private output
+must not be copied into the public receipt.
 Record the validated first-side receipt and raw event-stream hashes in the mate's
 receipt. Recompute that binding before grading and aggregation so later edits to
 the predecessor invalidate the pair.
