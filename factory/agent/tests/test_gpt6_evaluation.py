@@ -96,6 +96,31 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
     def tearDown(self):
         self.temp.cleanup()
 
+    def assertUnresolvedAttempt(self, raised, evidence: Path, case_id: str,
+                                side: str, reason: str):
+        exc = raised.exception
+        self.assertIsInstance(exc, evaluation.CodexRunUnresolved)
+        self.assertEqual(exc.summary["schema_version"], evaluation.UNRESOLVED_SCHEMA)
+        self.assertEqual(exc.summary["status"], "unresolved")
+        self.assertEqual(exc.summary["reason"], reason)
+        self.assertTrue(exc.summary["model_call_process_completed"])
+        self.assertFalse(exc.summary["completed"])
+        self.assertFalse(exc.summary["comparison_evidence_promoted"])
+        self.assertTrue(exc.summary["claim_retained_for_reconciliation"])
+        self.assertNotIn("GPT6_ACCESS_PROBE_OK", json.dumps(exc.summary))
+        receipt = Path(exc.receipt_path)
+        raw = Path(exc.raw_path)
+        stderr = Path(exc.stderr_path)
+        self.assertEqual(receipt.parent.parent, evidence / "unresolved")
+        self.assertIn("GPT6_ACCESS_PROBE_OK", raw.read_text())
+        self.assertEqual(stderr.read_bytes(), b"")
+        self.assertEqual(os.stat(receipt).st_mode & 0o777, 0o600)
+        self.assertEqual(os.stat(raw).st_mode & 0o777, 0o600)
+        stem = f"{case_id}.{side}"
+        self.assertTrue((evidence / ("." + stem + ".lock")).exists())
+        self.assertFalse((evidence / (stem + ".jsonl")).exists())
+        self.assertFalse((evidence / (stem + ".receipt.json")).exists())
+
     def test_campaign_validation_and_required_categories(self):
         loaded = evaluation.load_campaign(self.campaign_path)
         self.assertEqual(len(loaded["cases"]), 30)
@@ -341,15 +366,14 @@ raise SystemExit(99)
                                   return_value="chatgpt"), \
                 mock.patch.object(evaluation, "execute",
                                   wraps=evaluation.execute) as execute:
-            with self.assertRaisesRegex(evaluation.kernel.Rejected,
-                                        "CLI version changed during model execution"):
+            with self.assertRaises(evaluation.CodexRunUnresolved) as raised:
                 evaluation.collect(self.campaign_path, self.candidate_case_id,
                                    "candidate", self.workspace, evidence, 10,
                                    str(self.fake))
         execute.assert_called_once()
-        self.assertFalse((evidence / f"{self.candidate_case_id}.candidate.jsonl").exists())
-        self.assertFalse((evidence / f"{self.candidate_case_id}.candidate.receipt.json").exists())
-        self.assertTrue((evidence / f".{self.candidate_case_id}.candidate.lock").exists())
+        self.assertUnresolvedAttempt(
+            raised, evidence, self.candidate_case_id, "candidate",
+            "post-execution-runtime-revalidation-failed")
 
     def test_collect_rejects_auth_change_during_model_call(self):
         evidence = self.root / "evidence"
@@ -359,15 +383,14 @@ raise SystemExit(99)
                                   side_effect=["chatgpt", "api_key"]), \
                 mock.patch.object(evaluation, "execute",
                                   wraps=evaluation.execute) as execute:
-            with self.assertRaisesRegex(evaluation.kernel.Rejected,
-                                        "authentication surface changed during model execution"):
+            with self.assertRaises(evaluation.CodexRunUnresolved) as raised:
                 evaluation.collect(self.campaign_path, self.candidate_case_id,
                                    "candidate", self.workspace, evidence, 10,
                                    str(self.fake))
         execute.assert_called_once()
-        self.assertFalse((evidence / f"{self.candidate_case_id}.candidate.jsonl").exists())
-        self.assertFalse((evidence / f"{self.candidate_case_id}.candidate.receipt.json").exists())
-        self.assertTrue((evidence / f".{self.candidate_case_id}.candidate.lock").exists())
+        self.assertUnresolvedAttempt(
+            raised, evidence, self.candidate_case_id, "candidate",
+            "post-execution-runtime-revalidation-failed")
 
     def test_collect_rejects_runtime_lock_change_during_model_call(self):
         evidence = self.root / "evidence"
@@ -379,15 +402,32 @@ raise SystemExit(99)
             return result
 
         with mock.patch.object(evaluation, "execute", side_effect=mutate_lock) as execute:
-            with self.assertRaisesRegex(evaluation.kernel.Rejected,
-                                        "runtime lock is not private"):
+            with self.assertRaises(evaluation.CodexRunUnresolved) as raised:
                 evaluation.collect(self.campaign_path, self.candidate_case_id,
                                    "candidate", self.workspace, evidence, 10,
                                    str(self.fake))
         execute.assert_called_once()
-        self.assertFalse((evidence / f"{self.candidate_case_id}.candidate.jsonl").exists())
-        self.assertFalse((evidence / f"{self.candidate_case_id}.candidate.receipt.json").exists())
-        self.assertTrue((evidence / f".{self.candidate_case_id}.candidate.lock").exists())
+        self.assertUnresolvedAttempt(
+            raised, evidence, self.candidate_case_id, "candidate",
+            "post-execution-runtime-revalidation-failed")
+
+    def test_collect_preserves_output_when_runtime_lock_is_corrupted(self):
+        evidence = self.root / "evidence"
+        original_execute = evaluation.execute
+
+        def corrupt_lock(*args, **kwargs):
+            result = original_execute(*args, **kwargs)
+            (evidence / "campaign-runtime.json").write_text("{not-json\n")
+            return result
+
+        with mock.patch.object(evaluation, "execute", side_effect=corrupt_lock):
+            with self.assertRaises(evaluation.CodexRunUnresolved) as raised:
+                evaluation.collect(self.campaign_path, self.candidate_case_id,
+                                   "candidate", self.workspace, evidence, 10,
+                                   str(self.fake))
+        self.assertUnresolvedAttempt(
+            raised, evidence, self.candidate_case_id, "candidate",
+            "post-execution-runtime-revalidation-failed")
 
     def test_collect_rejects_timeout_mismatch_before_model_call(self):
         with mock.patch.object(evaluation, "_codex_version") as version, \
@@ -541,14 +581,12 @@ raise SystemExit(99)
             return result
 
         with mock.patch.object(evaluation, "execute", side_effect=execute_then_mutate):
-            with self.assertRaisesRegex(evaluation.kernel.Rejected,
-                                        "workspace must be clean"):
+            with self.assertRaises(evaluation.CodexRunUnresolved) as raised:
                 evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate", self.workspace,
                                    evidence, 10, str(self.fake))
-        stem = self.candidate_case_id + ".candidate"
-        self.assertTrue((evidence / ("." + stem + ".lock")).is_file())
-        self.assertFalse((evidence / (stem + ".receipt.json")).exists())
-        self.assertFalse((evidence / (stem + ".jsonl")).exists())
+        self.assertUnresolvedAttempt(
+            raised, evidence, self.candidate_case_id, "candidate",
+            "post-execution-workspace-revalidation-failed")
 
     def test_timeout_preserves_private_partial_evidence_without_counting_completion(self):
         slow = self.root / "slow-codex"

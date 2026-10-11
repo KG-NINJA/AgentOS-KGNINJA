@@ -82,6 +82,10 @@ After every completed model call, re-check the CLI version, authentication surfa
 and private campaign lock before promoting its output. A mid-call update, logout,
 authentication switch or lock mutation leaves the attempt unresolved for explicit
 reconciliation; it is not comparable success evidence.
+Retain bounded stdout/stderr and a private unresolved receipt for that completed
+process, including a post-call workspace change. Keep the case/side claim in place,
+expose only hashes and lifecycle metadata outside the private store, and never
+automatically retry or promote the unresolved output.
 Apply the same post-call CLI-version and authentication-surface recheck to the
 single GPT-6 access probe. A probe that completed across a runtime change is not
 valid access evidence even though it is not yet part of a comparison campaign.

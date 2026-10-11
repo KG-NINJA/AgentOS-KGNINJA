@@ -35,6 +35,7 @@ BLIND_SCHEMA = "gpt6-evaluation-blind.v1"
 BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v2"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
+UNRESOLVED_SCHEMA = "gpt6-execution-unresolved.v1"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
 AUTH_SURFACES = {"chatgpt", "api_key", "access_token"}
 COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
@@ -53,6 +54,10 @@ class CodexRunBlocked(subprocess.SubprocessError):
         self.receipt_path: str | None = None
         self.raw_path: str | None = None
         self.stderr_path: str | None = None
+
+
+class CodexRunUnresolved(CodexRunBlocked):
+    """A completed process whose comparison conditions could not be revalidated."""
 
 
 def _sha_bytes(value: bytes) -> str:
@@ -137,6 +142,14 @@ def _claim_attempt(evidence_dir: Path, stem: str) -> Path:
 
 def _blocked_attempt_dir(evidence_dir: Path, stem: str) -> Path:
     root = evidence_dir / "blocked"
+    _ensure_private_directory(root)
+    attempt = Path(tempfile.mkdtemp(prefix=stem + ".", dir=root))
+    os.chmod(attempt, 0o700)
+    return attempt
+
+
+def _unresolved_attempt_dir(evidence_dir: Path, stem: str) -> Path:
+    root = evidence_dir / "unresolved"
     _ensure_private_directory(root)
     attempt = Path(tempfile.mkdtemp(prefix=stem + ".", dir=root))
     os.chmod(attempt, 0o700)
@@ -621,6 +634,55 @@ def _blocked_summary(reason: str, model: str, effort: str, timeout_seconds: int,
     return summary
 
 
+def _preserve_unresolved_attempt(
+        campaign: dict[str, Any], case: dict[str, Any], side: str,
+        evidence_dir: Path, stem: str, model: str, version: str,
+        auth_surface: str, timeout_seconds: int, summary: dict[str, Any],
+        raw_stdout: bytes, raw_stderr: bytes, reason: str) -> CodexRunUnresolved:
+    """Retain a completed but unpromotable call without resolving its claim."""
+    attempt_dir = _unresolved_attempt_dir(evidence_dir, stem)
+    raw_path = attempt_dir / "stdout.jsonl"
+    stderr_path = attempt_dir / "stderr"
+    receipt_path = attempt_dir / "receipt.json"
+    raw_stored = len(raw_stdout) <= MAX_EVENT_STREAM_BYTES
+    stderr_stored = len(raw_stderr) <= MAX_EVENT_STREAM_BYTES
+    if raw_stored:
+        _write_private_bytes(raw_path, raw_stdout)
+    if stderr_stored:
+        _write_private_bytes(stderr_path, raw_stderr)
+    receipt = {
+        **_blocked_summary(reason, model, campaign["effort"], timeout_seconds,
+                           summary["latency_ms"], raw_stdout, raw_stderr, 0),
+        "schema_version": UNRESOLVED_SCHEMA,
+        "status": "unresolved",
+        "campaign_sha256": kernel.digest(campaign),
+        "case_id": case["id"],
+        "side": side,
+        "pair_order": _pair_order(case),
+        "category": case["category"],
+        "budget_id": campaign["budget_id"],
+        "input_sha256": case_input_sha(campaign, case),
+        "prompt_sha256": _sha_bytes(case["prompt"].encode()),
+        "source_commit": campaign["source_commit"],
+        "codex_version": version,
+        "auth_surface": auth_surface,
+        "provider_model_identity_verified": False,
+        "model_call_process_completed": True,
+        "completed": False,
+        "comparison_evidence_promoted": False,
+        "claim_retained_for_reconciliation": True,
+        "partial_stdout_stored": raw_stored,
+        "private_stderr_stored": stderr_stored,
+        "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    _write_private(receipt_path, receipt)
+    exc = CodexRunUnresolved(receipt, raw_stdout, raw_stderr)
+    exc.receipt_path = str(receipt_path)
+    exc.raw_path = str(raw_path) if raw_stored else None
+    exc.stderr_path = str(stderr_path) if stderr_stored else None
+    return exc
+
+
 def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_seconds: int,
             executable: str = "codex") -> tuple[dict[str, Any], bytes, bytes]:
     if effort not in ("low", "medium", "high", "xhigh", "max"):
@@ -707,8 +769,9 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
     resolved = False
     try:
         try:
-            summary, raw, _ = execute(model, campaign["effort"], case["prompt"], workspace,
-                                      timeout_seconds, executable)
+            summary, raw, stderr = execute(
+                model, campaign["effort"], case["prompt"], workspace,
+                timeout_seconds, executable)
         except CodexRunBlocked as exc:
             attempt_dir = _blocked_attempt_dir(evidence_dir, stem)
             raw_path = attempt_dir / "stdout.jsonl"
@@ -746,11 +809,25 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
             exc.stderr_path = str(stderr_path) if stderr_stored else None
             resolved = True
             raise
-        _revalidate_campaign_runtime_after_execution(
-            campaign, evidence_dir, executable, version, auth_surface)
+        try:
+            _revalidate_campaign_runtime_after_execution(
+                campaign, evidence_dir, executable, version, auth_surface)
+        except (kernel.Rejected, IncompatibleCodexCli, OSError,
+                subprocess.SubprocessError, json.JSONDecodeError,
+                UnicodeError) as exc:
+            raise _preserve_unresolved_attempt(
+                campaign, case, side, evidence_dir, stem, model, version,
+                auth_surface, timeout_seconds, summary, raw, stderr,
+                "post-execution-runtime-revalidation-failed") from exc
         # A concurrent local mutation can change what the read-only model saw.
         # Recheck after completion before promoting the output to success evidence.
-        verify_workspace(workspace, campaign["source_commit"])
+        try:
+            verify_workspace(workspace, campaign["source_commit"])
+        except (kernel.Rejected, OSError, subprocess.SubprocessError) as exc:
+            raise _preserve_unresolved_attempt(
+                campaign, case, side, evidence_dir, stem, model, version,
+                auth_surface, timeout_seconds, summary, raw, stderr,
+                "post-execution-workspace-revalidation-failed") from exc
         raw_path = evidence_dir / (stem + ".jsonl")
         receipt_path = evidence_dir / (stem + ".receipt.json")
         _write_private_bytes(raw_path, raw)

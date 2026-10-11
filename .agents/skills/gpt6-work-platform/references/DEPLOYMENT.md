@@ -110,6 +110,11 @@ Immediately after a completed inference, re-run the stable CLI and coarse
 authentication checks and re-read the campaign lock before writing success
 evidence. If any of those conditions changed during the call, retain the attempt
 claim for reconciliation and do not promote its output into the campaign.
+Preserve bounded stdout/stderr in a private per-attempt `unresolved/` directory
+with hashes, lifecycle metadata and an explicit non-promotion receipt. Apply the
+same handling when the measured checkout changes during the call. Do not release
+the claim, automatically retry the case/side or copy response content into public
+diagnostics until an operator has reconciled the attempt.
 The preliminary single-model access probe must likewise re-run the stable CLI and
 coarse authentication checks after completion. Treat a mid-probe version or
 authentication change as blocked rather than recording successful access. Preserve
