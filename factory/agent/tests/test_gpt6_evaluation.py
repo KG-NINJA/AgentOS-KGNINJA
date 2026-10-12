@@ -117,7 +117,17 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
         self.assertEqual(os.stat(receipt).st_mode & 0o777, 0o600)
         self.assertEqual(os.stat(raw).st_mode & 0o777, 0o600)
         stem = f"{case_id}.{side}"
-        self.assertTrue((evidence / ("." + stem + ".lock")).exists())
+        claim_path = evidence / ("." + stem + ".lock")
+        self.assertTrue(claim_path.exists())
+        claim = evaluation.kernel.load_json(claim_path)
+        self.assertEqual(claim["schema_version"], evaluation.CLAIM_SCHEMA)
+        self.assertEqual(claim["campaign_sha256"], evaluation.kernel.digest(self.campaign))
+        self.assertEqual(claim["case_id"], case_id)
+        self.assertEqual(claim["side"], side)
+        self.assertRegex(claim["attempt_id"], r"^[0-9a-f]{64}$")
+        self.assertEqual(exc.summary["claim_sha256"], evaluation.kernel.digest(claim))
+        self.assertNotIn(claim["attempt_id"], json.dumps(exc.summary))
+        self.assertEqual(os.stat(claim_path).st_mode & 0o777, 0o600)
         self.assertFalse((evidence / (stem + ".jsonl")).exists())
         self.assertFalse((evidence / (stem + ".receipt.json")).exists())
 
@@ -714,6 +724,26 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
                                    evidence, 10, str(self.fake))
         execute.assert_not_called()
         self.assertEqual(lock.read_text(), "existing uncertain attempt\n")
+
+    def test_claim_is_complete_private_and_unique_per_attempt(self):
+        evidence = self.root / "evidence"
+        campaign_sha256 = evaluation.kernel.digest(self.campaign)
+        stem = self.candidate_case_id + ".candidate"
+        first_path, first = evaluation._claim_attempt(
+            evidence, stem, campaign_sha256, self.candidate_case_id, "candidate")
+        self.assertEqual(evaluation.kernel.load_json(first_path), first)
+        self.assertEqual(set(first), {"schema_version", "campaign_sha256",
+                                     "case_id", "side", "attempt_id"})
+        self.assertEqual(os.stat(first_path).st_mode & 0o777, 0o600)
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "attempt already in progress"):
+            evaluation._claim_attempt(
+                evidence, stem, campaign_sha256, self.candidate_case_id, "candidate")
+        first_path.unlink()
+        second_path, second = evaluation._claim_attempt(
+            evidence, stem, campaign_sha256, self.candidate_case_id, "candidate")
+        self.assertNotEqual(first["attempt_id"], second["attempt_id"])
+        self.assertEqual(evaluation.kernel.load_json(second_path), second)
 
     def test_symlinked_evidence_directory_is_rejected_before_inference(self):
         real = self.root / "real-evidence"

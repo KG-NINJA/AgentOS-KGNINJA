@@ -115,6 +115,10 @@ with hashes, lifecycle metadata and an explicit non-promotion receipt. Apply the
 same handling when the measured checkout changes during the call. Do not release
 the claim, automatically retry the case/side or copy response content into public
 diagnostics until an operator has reconciled the attempt.
+Publish the pre-inference claim atomically as complete private JSON. Bind it to the
+campaign, case and side with a cryptographically random private attempt ID, and
+bind each unresolved receipt to the exact retained claim SHA-256. A missing,
+partial or mismatched claim is not reconcilable evidence and must not be promoted.
 The preliminary single-model access probe must likewise re-run the stable CLI and
 coarse authentication checks after completion. Treat a mid-probe version or
 authentication change as blocked rather than recording successful access. Preserve

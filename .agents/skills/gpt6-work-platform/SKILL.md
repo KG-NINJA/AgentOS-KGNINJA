@@ -86,6 +86,10 @@ Retain bounded stdout/stderr and a private unresolved receipt for that completed
 process, including a post-call workspace change. Keep the case/side claim in place,
 expose only hashes and lifecycle metadata outside the private store, and never
 automatically retry or promote the unresolved output.
+Create the claim atomically as complete private JSON before inference, with a
+cryptographically random attempt identifier and the campaign/case/side binding.
+Bind an unresolved receipt to the exact retained claim hash so reconciliation
+cannot attach output to a stale or different claim. Keep the identifier private.
 Apply the same post-call CLI-version and authentication-surface recheck to the
 single GPT-6 access probe. A probe that completed across a runtime change is not
 valid access evidence even though it is not yet part of a comparison campaign.

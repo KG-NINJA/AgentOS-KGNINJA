@@ -35,7 +35,8 @@ BLIND_SCHEMA = "gpt6-evaluation-blind.v1"
 BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v2"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
-UNRESOLVED_SCHEMA = "gpt6-execution-unresolved.v1"
+CLAIM_SCHEMA = "gpt6-evaluation-claim.v1"
+UNRESOLVED_SCHEMA = "gpt6-execution-unresolved.v2"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
 AUTH_SURFACES = {"chatgpt", "api_key", "access_token"}
 COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
@@ -116,7 +117,8 @@ def _publish_private_exclusive(path: Path, value: dict[str, Any]) -> bool:
         Path(temporary).unlink(missing_ok=True)
 
 
-def _claim_attempt(evidence_dir: Path, stem: str) -> Path:
+def _claim_attempt(evidence_dir: Path, stem: str, campaign_sha256: str,
+                   case_id: str, side: str) -> tuple[Path, dict[str, Any]]:
     """Claim one case/side before inference and refuse uncertain re-entry."""
     _ensure_private_directory(evidence_dir)
     completed = (evidence_dir / (stem + ".jsonl"),
@@ -124,20 +126,20 @@ def _claim_attempt(evidence_dir: Path, stem: str) -> Path:
     if any(path.exists() or path.is_symlink() for path in completed):
         raise kernel.Rejected("completed or partial evidence already exists")
     lock_path = evidence_dir / ("." + stem + ".lock")
-    try:
-        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError as exc:
-        raise kernel.Rejected("attempt already in progress or requires reconciliation") from exc
-    try:
-        os.write(descriptor, b"gpt6-evaluation-attempt\n")
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    claim = {
+        "schema_version": CLAIM_SCHEMA,
+        "campaign_sha256": campaign_sha256,
+        "case_id": case_id,
+        "side": side,
+        "attempt_id": secrets.token_hex(32),
+    }
+    if not _publish_private_exclusive(lock_path, claim):
+        raise kernel.Rejected("attempt already in progress or requires reconciliation")
     # Close the race between the initial evidence check and the exclusive claim.
     if any(path.exists() or path.is_symlink() for path in completed):
         lock_path.unlink()
         raise kernel.Rejected("completed or partial evidence already exists")
-    return lock_path
+    return lock_path, claim
 
 
 def _blocked_attempt_dir(evidence_dir: Path, stem: str) -> Path:
@@ -638,7 +640,8 @@ def _preserve_unresolved_attempt(
         campaign: dict[str, Any], case: dict[str, Any], side: str,
         evidence_dir: Path, stem: str, model: str, version: str,
         auth_surface: str, timeout_seconds: int, summary: dict[str, Any],
-        raw_stdout: bytes, raw_stderr: bytes, reason: str) -> CodexRunUnresolved:
+        raw_stdout: bytes, raw_stderr: bytes, reason: str,
+        claim: dict[str, Any]) -> CodexRunUnresolved:
     """Retain a completed but unpromotable call without resolving its claim."""
     attempt_dir = _unresolved_attempt_dir(evidence_dir, stem)
     raw_path = attempt_dir / "stdout.jsonl"
@@ -671,6 +674,7 @@ def _preserve_unresolved_attempt(
         "completed": False,
         "comparison_evidence_promoted": False,
         "claim_retained_for_reconciliation": True,
+        "claim_sha256": kernel.digest(claim),
         "partial_stdout_stored": raw_stored,
         "private_stderr_stored": stderr_stored,
         "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -765,7 +769,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
         raise kernel.Rejected("mate authentication surface differs from campaign-selected first side")
     _bind_campaign_runtime(campaign, evidence_dir, version, auth_surface)
     stem = case_id + "." + side
-    lock_path = _claim_attempt(evidence_dir, stem)
+    lock_path, claim = _claim_attempt(
+        evidence_dir, stem, kernel.digest(campaign), case_id, side)
     resolved = False
     try:
         try:
@@ -818,7 +823,7 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
             raise _preserve_unresolved_attempt(
                 campaign, case, side, evidence_dir, stem, model, version,
                 auth_surface, timeout_seconds, summary, raw, stderr,
-                "post-execution-runtime-revalidation-failed") from exc
+                "post-execution-runtime-revalidation-failed", claim) from exc
         # A concurrent local mutation can change what the read-only model saw.
         # Recheck after completion before promoting the output to success evidence.
         try:
@@ -827,7 +832,7 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
             raise _preserve_unresolved_attempt(
                 campaign, case, side, evidence_dir, stem, model, version,
                 auth_surface, timeout_seconds, summary, raw, stderr,
-                "post-execution-workspace-revalidation-failed") from exc
+                "post-execution-workspace-revalidation-failed", claim) from exc
         raw_path = evidence_dir / (stem + ".jsonl")
         receipt_path = evidence_dir / (stem + ".receipt.json")
         _write_private_bytes(raw_path, raw)
