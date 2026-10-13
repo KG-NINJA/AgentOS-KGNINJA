@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import stat
 import subprocess
 import sys
 import tempfile
@@ -37,6 +38,7 @@ GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CLAIM_SCHEMA = "gpt6-evaluation-claim.v1"
 UNRESOLVED_SCHEMA = "gpt6-execution-unresolved.v2"
+UNRESOLVED_AUDIT_SCHEMA = "gpt6-unresolved-audit.v1"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
 AUTH_SURFACES = {"chatgpt", "api_key", "access_token"}
 COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
@@ -687,6 +689,163 @@ def _preserve_unresolved_attempt(
     return exc
 
 
+def _require_private_path(path: Path, mode: int, *, directory: bool = False) -> None:
+    """Reject missing, linked or permission-drifted private evidence paths."""
+    if path.is_symlink() or (not path.is_dir() if directory else not path.is_file()):
+        raise kernel.Rejected("unresolved evidence path is invalid")
+    if stat.S_IMODE(path.stat().st_mode) != mode:
+        raise kernel.Rejected("unresolved evidence permissions are invalid")
+
+
+def audit_unresolved_attempt(campaign_path: Path, case_id: str, side: str,
+                             evidence_dir: Path) -> dict[str, Any]:
+    """Verify one retained attempt without promoting it or releasing its claim."""
+    campaign = load_campaign(campaign_path)
+    case = _case(campaign, case_id)
+    if side not in ("baseline", "candidate"):
+        raise kernel.Rejected("side must be baseline or candidate")
+    _require_private_path(evidence_dir, 0o700, directory=True)
+    stem = case_id + "." + side
+    claim_path = evidence_dir / ("." + stem + ".lock")
+    _require_private_path(claim_path, 0o600)
+    claim = kernel.load_json(claim_path)
+    expected_claim = {"schema_version", "campaign_sha256", "case_id", "side",
+                      "attempt_id"}
+    campaign_sha256 = kernel.digest(campaign)
+    if (type(claim) is not dict or set(claim) != expected_claim
+            or claim["schema_version"] != CLAIM_SCHEMA
+            or claim["campaign_sha256"] != campaign_sha256
+            or claim["case_id"] != case_id or claim["side"] != side
+            or type(claim["attempt_id"]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", claim["attempt_id"]) is None):
+        raise kernel.Rejected("retained attempt claim is invalid")
+
+    unresolved_root = evidence_dir / "unresolved"
+    _require_private_path(unresolved_root, 0o700, directory=True)
+    attempts = [path for path in unresolved_root.iterdir()
+                if path.name.startswith(stem + ".")]
+    if len(attempts) != 1:
+        raise kernel.Rejected("unresolved attempt is missing or ambiguous")
+    attempt_dir = attempts[0]
+    _require_private_path(attempt_dir, 0o700, directory=True)
+    receipt_path = attempt_dir / "receipt.json"
+    _require_private_path(receipt_path, 0o600)
+    receipt = kernel.load_json(receipt_path)
+    expected_receipt = {
+        "schema_version", "status", "reason", "requested_model",
+        "requested_effort", "timeout_seconds", "latency_ms",
+        "process_returncode", "stdout_bytes", "stdout_sha256",
+        "stderr_bytes", "stderr_sha256", "parseable_event_count",
+        "malformed_event_line_count", "thread_started_observed",
+        "turn_started_observed", "turn_completed_observed",
+        "failure_event_observed", "event_scan_truncated",
+        "campaign_sha256", "case_id", "side", "pair_order", "category",
+        "budget_id", "input_sha256", "prompt_sha256", "source_commit",
+        "codex_version", "auth_surface", "provider_model_identity_verified",
+        "model_call_process_completed", "completed",
+        "comparison_evidence_promoted", "claim_retained_for_reconciliation",
+        "claim_sha256", "partial_stdout_stored", "private_stderr_stored",
+        "observed_at",
+    }
+    allowed_reasons = {
+        "post-execution-runtime-revalidation-failed",
+        "post-execution-workspace-revalidation-failed",
+    }
+    if (type(receipt) is not dict or set(receipt) != expected_receipt
+            or receipt["schema_version"] != UNRESOLVED_SCHEMA
+            or receipt["status"] != "unresolved"
+            or receipt["reason"] not in allowed_reasons
+            or receipt["campaign_sha256"] != campaign_sha256
+            or receipt["case_id"] != case_id or receipt["side"] != side
+            or receipt["pair_order"] != _pair_order(case)
+            or receipt["category"] != case["category"]
+            or receipt["requested_model"] != campaign[side + "_model"]
+            or receipt["requested_effort"] != campaign["effort"]
+            or receipt["timeout_seconds"] != campaign["timeout_seconds"]
+            or receipt["budget_id"] != campaign["budget_id"]
+            or receipt["input_sha256"] != case_input_sha(campaign, case)
+            or receipt["prompt_sha256"] != _sha_bytes(case["prompt"].encode())
+            or receipt["source_commit"] != campaign["source_commit"]
+            or receipt["auth_surface"] not in AUTH_SURFACES
+            or receipt["provider_model_identity_verified"] is not False
+            or receipt["model_call_process_completed"] is not True
+            or receipt["process_returncode"] != 0
+            or receipt["completed"] is not False
+            or receipt["comparison_evidence_promoted"] is not False
+            or receipt["claim_retained_for_reconciliation"] is not True
+            or receipt["claim_sha256"] != kernel.digest(claim)):
+        raise kernel.Rejected("unresolved receipt does not match retained attempt")
+    _validated_codex_version(receipt["codex_version"])
+    _observed_epoch(receipt["observed_at"])
+    latency_ms = kernel.number(receipt["latency_ms"], positive=True)
+    if latency_ms > 3_600_000:
+        raise kernel.Rejected("unresolved receipt has invalid latency")
+    for field in ("stdout_bytes", "stderr_bytes", "parseable_event_count",
+                  "malformed_event_line_count"):
+        if type(receipt[field]) is not int or receipt[field] < 0:
+            raise kernel.Rejected("unresolved receipt has invalid counts")
+    for field in ("stdout_sha256", "stderr_sha256", "claim_sha256"):
+        if type(receipt[field]) is not str or kernel.SHA.fullmatch(receipt[field]) is None:
+            raise kernel.Rejected("unresolved receipt has invalid hash")
+    for field in ("thread_started_observed", "turn_started_observed",
+                  "turn_completed_observed", "failure_event_observed",
+                  "event_scan_truncated", "partial_stdout_stored",
+                  "private_stderr_stored"):
+        if type(receipt[field]) is not bool:
+            raise kernel.Rejected("unresolved receipt has invalid lifecycle flags")
+
+    expected_entries = {"receipt.json"}
+    raw_path = attempt_dir / "stdout.jsonl"
+    if receipt["partial_stdout_stored"]:
+        _require_private_path(raw_path, 0o600)
+        raw = raw_path.read_bytes()
+        expected_summary = _partial_event_summary(raw)
+        if (len(raw) != receipt["stdout_bytes"]
+                or _sha_bytes(raw) != receipt["stdout_sha256"]
+                or any(receipt[field] != value
+                       for field, value in expected_summary.items())):
+            raise kernel.Rejected("stored unresolved stdout does not match receipt")
+        _completion_evidence(raw)
+        expected_entries.add("stdout.jsonl")
+    elif receipt["stdout_bytes"] <= MAX_EVENT_STREAM_BYTES or raw_path.exists() or raw_path.is_symlink():
+        raise kernel.Rejected("unstored unresolved stdout is inconsistent")
+
+    stderr_path = attempt_dir / "stderr"
+    if receipt["private_stderr_stored"]:
+        _require_private_path(stderr_path, 0o600)
+        stderr = stderr_path.read_bytes()
+        if (len(stderr) != receipt["stderr_bytes"]
+                or _sha_bytes(stderr) != receipt["stderr_sha256"]):
+            raise kernel.Rejected("stored unresolved stderr does not match receipt")
+        expected_entries.add("stderr")
+    elif receipt["stderr_bytes"] <= MAX_EVENT_STREAM_BYTES or stderr_path.exists() or stderr_path.is_symlink():
+        raise kernel.Rejected("unstored unresolved stderr is inconsistent")
+
+    if {path.name for path in attempt_dir.iterdir()} != expected_entries:
+        raise kernel.Rejected("unresolved attempt contains unexpected evidence")
+    completed = (evidence_dir / (stem + ".jsonl"),
+                 evidence_dir / (stem + ".receipt.json"))
+    if any(path.exists() or path.is_symlink() for path in completed):
+        raise kernel.Rejected("unresolved attempt was also promoted")
+    return {
+        "schema_version": UNRESOLVED_AUDIT_SCHEMA,
+        "status": "unresolved_verified",
+        "campaign_sha256": campaign_sha256,
+        "case_id": case_id,
+        "side": side,
+        "reason": receipt["reason"],
+        "claim_sha256": receipt["claim_sha256"],
+        "stdout_bytes": receipt["stdout_bytes"],
+        "stdout_sha256": receipt["stdout_sha256"],
+        "stderr_bytes": receipt["stderr_bytes"],
+        "stderr_sha256": receipt["stderr_sha256"],
+        "model_call_process_completed": True,
+        "comparison_evidence_promoted": False,
+        "claim_retained_for_reconciliation": True,
+        "operator_action_required": True,
+    }
+
+
 def execute(model: str, effort: str, prompt: str, workspace: Path, timeout_seconds: int,
             executable: str = "codex") -> tuple[dict[str, Any], bytes, bytes]:
     if effort not in ("low", "medium", "high", "xhigh", "max"):
@@ -1198,6 +1357,11 @@ def main() -> int:
     collect_cmd.add_argument("--evidence-dir", type=Path, default=ROOT / "runtime/gpt6-evaluation")
     collect_cmd.add_argument("--timeout-seconds", type=int,
                              help="must match the campaign value; omitted uses the campaign")
+    audit_cmd = sub.add_parser("audit-unresolved")
+    audit_cmd.add_argument("--campaign", type=Path, required=True)
+    audit_cmd.add_argument("--case-id", required=True)
+    audit_cmd.add_argument("--side", choices=("baseline", "candidate"), required=True)
+    audit_cmd.add_argument("--evidence-dir", type=Path, required=True)
     blind_cmd = sub.add_parser("prepare-grading")
     blind_cmd.add_argument("--campaign", type=Path, required=True)
     blind_cmd.add_argument("--evidence-dir", type=Path, required=True)
@@ -1224,6 +1388,9 @@ def main() -> int:
         elif args.command == "collect":
             output = collect(args.campaign, args.case_id, args.side, args.workspace,
                              args.evidence_dir, args.timeout_seconds)
+        elif args.command == "audit-unresolved":
+            output = audit_unresolved_attempt(
+                args.campaign, args.case_id, args.side, args.evidence_dir)
         elif args.command == "prepare-grading":
             output = prepare_blind_grading(args.campaign, args.evidence_dir,
                                            args.output, args.mapping_output)

@@ -119,6 +119,13 @@ Publish the pre-inference claim atomically as complete private JSON. Bind it to 
 campaign, case and side with a cryptographically random private attempt ID, and
 bind each unresolved receipt to the exact retained claim SHA-256. A missing,
 partial or mismatched claim is not reconcilable evidence and must not be promoted.
+Run `factory/agent/gpt6_evaluation.py audit-unresolved` before an operator reviews
+any retained attempt. It verifies the 0600 claim and files, 0700 directories,
+campaign binding, exact stored hashes and absence of promoted success evidence.
+The command is read-only: it does not reveal the private attempt ID or payload,
+remove the claim, retry the call or promote output. A failed or ambiguous audit
+requires manual investigation; a passing audit still requires an explicit,
+separately reviewed reconciliation policy before any state change.
 The preliminary single-model access probe must likewise re-run the stable CLI and
 coarse authentication checks after completion. Treat a mid-probe version or
 authentication change as blocked rather than recording successful access. Preserve

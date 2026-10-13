@@ -131,6 +131,27 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
         self.assertFalse((evidence / (stem + ".jsonl")).exists())
         self.assertFalse((evidence / (stem + ".receipt.json")).exists())
 
+    def makeUnresolvedAttempt(self, evidence: Path):
+        real_execute = evaluation.execute
+
+        def execute_then_mutate(*args, **kwargs):
+            result = real_execute(*args, **kwargs)
+            (self.workspace / "ignored.txt").write_text("created during execution\n")
+            return result
+
+        try:
+            with mock.patch.object(evaluation, "execute", side_effect=execute_then_mutate):
+                with self.assertRaises(evaluation.CodexRunUnresolved) as raised:
+                    evaluation.collect(
+                        self.campaign_path, self.candidate_case_id, "candidate",
+                        self.workspace, evidence, 10, str(self.fake))
+        finally:
+            (self.workspace / "ignored.txt").unlink(missing_ok=True)
+        self.assertUnresolvedAttempt(
+            raised, evidence, self.candidate_case_id, "candidate",
+            "post-execution-workspace-revalidation-failed")
+        return raised.exception
+
     def test_campaign_validation_and_required_categories(self):
         loaded = evaluation.load_campaign(self.campaign_path)
         self.assertEqual(len(loaded["cases"]), 30)
@@ -597,6 +618,68 @@ raise SystemExit(99)
         self.assertUnresolvedAttempt(
             raised, evidence, self.candidate_case_id, "candidate",
             "post-execution-workspace-revalidation-failed")
+
+    def test_unresolved_audit_is_read_only_and_does_not_expose_attempt(self):
+        evidence = self.root / "audit-evidence"
+        unresolved = self.makeUnresolvedAttempt(evidence)
+        claim_path = evidence / f".{self.candidate_case_id}.candidate.lock"
+        claim_before = claim_path.read_bytes()
+        entries_before = sorted(str(path.relative_to(evidence))
+                                for path in evidence.rglob("*"))
+        stdout = io.StringIO()
+        argv = ["gpt6_evaluation.py", "audit-unresolved",
+                "--campaign", str(self.campaign_path),
+                "--case-id", self.candidate_case_id, "--side", "candidate",
+                "--evidence-dir", str(evidence)]
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(stdout):
+            self.assertEqual(evaluation.main(), 0)
+        public = json.loads(stdout.getvalue())
+        self.assertEqual(public["schema_version"], evaluation.UNRESOLVED_AUDIT_SCHEMA)
+        self.assertEqual(public["status"], "unresolved_verified")
+        self.assertTrue(public["operator_action_required"])
+        self.assertFalse(public["comparison_evidence_promoted"])
+        self.assertTrue(public["claim_retained_for_reconciliation"])
+        self.assertNotIn("attempt_id", stdout.getvalue())
+        self.assertNotIn("GPT6_ACCESS_PROBE_OK", stdout.getvalue())
+        self.assertEqual(public["claim_sha256"], unresolved.summary["claim_sha256"])
+        self.assertEqual(claim_path.read_bytes(), claim_before)
+        self.assertEqual(sorted(str(path.relative_to(evidence))
+                                for path in evidence.rglob("*")), entries_before)
+
+    def test_unresolved_audit_rejects_claim_or_raw_evidence_tampering(self):
+        claim_evidence = self.root / "tampered-claim"
+        self.makeUnresolvedAttempt(claim_evidence)
+        claim_path = claim_evidence / f".{self.candidate_case_id}.candidate.lock"
+        claim = evaluation.kernel.load_json(claim_path)
+        claim["attempt_id"] = ("0" if claim["attempt_id"][0] != "0" else "1") + claim["attempt_id"][1:]
+        evaluation._write_private(claim_path, claim)
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "receipt does not match retained attempt"):
+            evaluation.audit_unresolved_attempt(
+                self.campaign_path, self.candidate_case_id, "candidate",
+                claim_evidence)
+
+        raw_evidence = self.root / "tampered-raw"
+        unresolved = self.makeUnresolvedAttempt(raw_evidence)
+        raw_path = Path(unresolved.raw_path)
+        raw_path.write_bytes(raw_path.read_bytes() + b" \n")
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "stdout does not match receipt"):
+            evaluation.audit_unresolved_attempt(
+                self.campaign_path, self.candidate_case_id, "candidate",
+                raw_evidence)
+
+    def test_unresolved_audit_rejects_ambiguous_attempts(self):
+        evidence = self.root / "ambiguous-evidence"
+        self.makeUnresolvedAttempt(evidence)
+        duplicate = (evidence / "unresolved"
+                     / f"{self.candidate_case_id}.candidate.duplicate")
+        duplicate.mkdir(mode=0o700)
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "missing or ambiguous"):
+            evaluation.audit_unresolved_attempt(
+                self.campaign_path, self.candidate_case_id, "candidate",
+                evidence)
 
     def test_timeout_preserves_private_partial_evidence_without_counting_completion(self):
         slow = self.root / "slow-codex"

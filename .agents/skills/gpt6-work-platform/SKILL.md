@@ -90,6 +90,11 @@ Create the claim atomically as complete private JSON before inference, with a
 cryptographically random attempt identifier and the campaign/case/side binding.
 Bind an unresolved receipt to the exact retained claim hash so reconciliation
 cannot attach output to a stale or different claim. Keep the identifier private.
+Before any reconciliation decision, use the read-only unresolved-attempt audit to
+verify the private claim, receipt, stored stream hashes, modes and non-promotion
+state. The audit must retain the claim, expose no attempt ID or payload and refuse
+missing, ambiguous, modified or already-promoted attempts. A successful audit is
+only evidence integrity; it does not authorize promotion, retry or claim release.
 Apply the same post-call CLI-version and authentication-surface recheck to the
 single GPT-6 access probe. A probe that completed across a runtime change is not
 valid access evidence even though it is not yet part of a comparison campaign.
