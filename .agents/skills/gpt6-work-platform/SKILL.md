@@ -95,6 +95,10 @@ verify the private claim, receipt, stored stream hashes, modes and non-promotion
 state. The audit must retain the claim, expose no attempt ID or payload and refuse
 missing, ambiguous, modified or already-promoted attempts. A successful audit is
 only evidence integrity; it does not authorize promotion, retry or claim release.
+Bind the audit output to the unresolved receipt hash and re-open every claim,
+receipt and stored stream through no-follow descriptors after validation. Reject
+replacement, permission drift, attempt-set changes or promotion that occurs while
+the audit is running; never return a result assembled from mixed snapshots.
 Apply the same post-call CLI-version and authentication-surface recheck to the
 single GPT-6 access probe. A probe that completed across a runtime change is not
 valid access evidence even though it is not yet part of a comparison campaign.

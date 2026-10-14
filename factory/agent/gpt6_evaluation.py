@@ -38,7 +38,7 @@ GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CLAIM_SCHEMA = "gpt6-evaluation-claim.v1"
 UNRESOLVED_SCHEMA = "gpt6-execution-unresolved.v2"
-UNRESOLVED_AUDIT_SCHEMA = "gpt6-unresolved-audit.v1"
+UNRESOLVED_AUDIT_SCHEMA = "gpt6-unresolved-audit.v2"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
 AUTH_SURFACES = {"chatgpt", "api_key", "access_token"}
 COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
@@ -689,12 +689,66 @@ def _preserve_unresolved_attempt(
     return exc
 
 
-def _require_private_path(path: Path, mode: int, *, directory: bool = False) -> None:
-    """Reject missing, linked or permission-drifted private evidence paths."""
-    if path.is_symlink() or (not path.is_dir() if directory else not path.is_file()):
-        raise kernel.Rejected("unresolved evidence path is invalid")
-    if stat.S_IMODE(path.stat().st_mode) != mode:
-        raise kernel.Rejected("unresolved evidence permissions are invalid")
+def _private_file_snapshot(path: Path, mode: int, limit: int) -> tuple[bytes, tuple[int, ...]]:
+    """Read one private regular file through a no-follow descriptor."""
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+        )
+    except OSError as exc:
+        raise kernel.Rejected("unresolved evidence path is invalid") from exc
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise kernel.Rejected("unresolved evidence path is invalid")
+        if stat.S_IMODE(info.st_mode) != mode:
+            raise kernel.Rejected("unresolved evidence permissions are invalid")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            payload = handle.read(limit + 1)
+        if len(payload) > limit:
+            raise kernel.Rejected("unresolved evidence byte limit")
+        if len(payload) != info.st_size:
+            raise kernel.Rejected("unresolved evidence changed during audit")
+        identity = (info.st_dev, info.st_ino, info.st_size,
+                    info.st_mtime_ns, info.st_ctime_ns)
+        return payload, identity
+    finally:
+        os.close(descriptor)
+
+
+def _require_unchanged_private_snapshot(
+        path: Path, mode: int, limit: int,
+        expected: tuple[bytes, tuple[int, ...]]) -> None:
+    """Fail closed when evidence changed after it was first validated."""
+    try:
+        current = _private_file_snapshot(path, mode, limit)
+    except (kernel.Rejected, OSError) as exc:
+        raise kernel.Rejected("unresolved evidence changed during audit") from exc
+    if current != expected:
+        raise kernel.Rejected("unresolved evidence changed during audit")
+
+
+def _private_directory_snapshot(path: Path, mode: int) -> tuple[int, ...]:
+    """Open one private directory without following its final component."""
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+        )
+    except OSError as exc:
+        raise kernel.Rejected("unresolved evidence path is invalid") from exc
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISDIR(info.st_mode):
+            raise kernel.Rejected("unresolved evidence path is invalid")
+        if stat.S_IMODE(info.st_mode) != mode:
+            raise kernel.Rejected("unresolved evidence permissions are invalid")
+        return (info.st_dev, info.st_ino, info.st_mode,
+                info.st_mtime_ns, info.st_ctime_ns)
+    finally:
+        os.close(descriptor)
 
 
 def audit_unresolved_attempt(campaign_path: Path, case_id: str, side: str,
@@ -704,11 +758,11 @@ def audit_unresolved_attempt(campaign_path: Path, case_id: str, side: str,
     case = _case(campaign, case_id)
     if side not in ("baseline", "candidate"):
         raise kernel.Rejected("side must be baseline or candidate")
-    _require_private_path(evidence_dir, 0o700, directory=True)
+    evidence_dir_snapshot = _private_directory_snapshot(evidence_dir, 0o700)
     stem = case_id + "." + side
     claim_path = evidence_dir / ("." + stem + ".lock")
-    _require_private_path(claim_path, 0o600)
-    claim = kernel.load_json(claim_path)
+    claim_snapshot = _private_file_snapshot(claim_path, 0o600, kernel.MAX_BYTES)
+    claim = kernel.parse_json(claim_snapshot[0])
     expected_claim = {"schema_version", "campaign_sha256", "case_id", "side",
                       "attempt_id"}
     campaign_sha256 = kernel.digest(campaign)
@@ -721,16 +775,16 @@ def audit_unresolved_attempt(campaign_path: Path, case_id: str, side: str,
         raise kernel.Rejected("retained attempt claim is invalid")
 
     unresolved_root = evidence_dir / "unresolved"
-    _require_private_path(unresolved_root, 0o700, directory=True)
+    unresolved_root_snapshot = _private_directory_snapshot(unresolved_root, 0o700)
     attempts = [path for path in unresolved_root.iterdir()
                 if path.name.startswith(stem + ".")]
     if len(attempts) != 1:
         raise kernel.Rejected("unresolved attempt is missing or ambiguous")
     attempt_dir = attempts[0]
-    _require_private_path(attempt_dir, 0o700, directory=True)
+    attempt_dir_snapshot = _private_directory_snapshot(attempt_dir, 0o700)
     receipt_path = attempt_dir / "receipt.json"
-    _require_private_path(receipt_path, 0o600)
-    receipt = kernel.load_json(receipt_path)
+    receipt_snapshot = _private_file_snapshot(receipt_path, 0o600, kernel.MAX_BYTES)
+    receipt = kernel.parse_json(receipt_snapshot[0])
     expected_receipt = {
         "schema_version", "status", "reason", "requested_model",
         "requested_effort", "timeout_seconds", "latency_ms",
@@ -795,10 +849,15 @@ def audit_unresolved_attempt(campaign_path: Path, case_id: str, side: str,
             raise kernel.Rejected("unresolved receipt has invalid lifecycle flags")
 
     expected_entries = {"receipt.json"}
+    private_snapshots = {
+        claim_path: (0o600, kernel.MAX_BYTES, claim_snapshot),
+        receipt_path: (0o600, kernel.MAX_BYTES, receipt_snapshot),
+    }
     raw_path = attempt_dir / "stdout.jsonl"
     if receipt["partial_stdout_stored"]:
-        _require_private_path(raw_path, 0o600)
-        raw = raw_path.read_bytes()
+        raw_snapshot = _private_file_snapshot(raw_path, 0o600, MAX_EVENT_STREAM_BYTES)
+        raw = raw_snapshot[0]
+        private_snapshots[raw_path] = (0o600, MAX_EVENT_STREAM_BYTES, raw_snapshot)
         expected_summary = _partial_event_summary(raw)
         if (len(raw) != receipt["stdout_bytes"]
                 or _sha_bytes(raw) != receipt["stdout_sha256"]
@@ -812,8 +871,11 @@ def audit_unresolved_attempt(campaign_path: Path, case_id: str, side: str,
 
     stderr_path = attempt_dir / "stderr"
     if receipt["private_stderr_stored"]:
-        _require_private_path(stderr_path, 0o600)
-        stderr = stderr_path.read_bytes()
+        stderr_snapshot = _private_file_snapshot(
+            stderr_path, 0o600, MAX_EVENT_STREAM_BYTES)
+        stderr = stderr_snapshot[0]
+        private_snapshots[stderr_path] = (
+            0o600, MAX_EVENT_STREAM_BYTES, stderr_snapshot)
         if (len(stderr) != receipt["stderr_bytes"]
                 or _sha_bytes(stderr) != receipt["stderr_sha256"]):
             raise kernel.Rejected("stored unresolved stderr does not match receipt")
@@ -827,6 +889,27 @@ def audit_unresolved_attempt(campaign_path: Path, case_id: str, side: str,
                  evidence_dir / (stem + ".receipt.json"))
     if any(path.exists() or path.is_symlink() for path in completed):
         raise kernel.Rejected("unresolved attempt was also promoted")
+    for path, (mode, limit, snapshot) in private_snapshots.items():
+        _require_unchanged_private_snapshot(path, mode, limit, snapshot)
+    try:
+        current_directories = (
+            _private_directory_snapshot(evidence_dir, 0o700),
+            _private_directory_snapshot(unresolved_root, 0o700),
+            _private_directory_snapshot(attempt_dir, 0o700),
+        )
+    except (kernel.Rejected, OSError) as exc:
+        raise kernel.Rejected("unresolved evidence changed during audit") from exc
+    if current_directories != (
+            evidence_dir_snapshot, unresolved_root_snapshot, attempt_dir_snapshot):
+        raise kernel.Rejected("unresolved evidence changed during audit")
+    # Re-check selection and promotion after the final descriptor reads so the
+    # result cannot describe a mixture of two retained attempts.
+    if ([path.name for path in unresolved_root.iterdir()
+         if path.name.startswith(stem + ".")] != [attempt_dir.name]
+            or {path.name for path in attempt_dir.iterdir()} != expected_entries):
+        raise kernel.Rejected("unresolved evidence changed during audit")
+    if any(path.exists() or path.is_symlink() for path in completed):
+        raise kernel.Rejected("unresolved attempt was also promoted")
     return {
         "schema_version": UNRESOLVED_AUDIT_SCHEMA,
         "status": "unresolved_verified",
@@ -835,6 +918,7 @@ def audit_unresolved_attempt(campaign_path: Path, case_id: str, side: str,
         "side": side,
         "reason": receipt["reason"],
         "claim_sha256": receipt["claim_sha256"],
+        "receipt_sha256": kernel.digest(receipt),
         "stdout_bytes": receipt["stdout_bytes"],
         "stdout_sha256": receipt["stdout_sha256"],
         "stderr_bytes": receipt["stderr_bytes"],

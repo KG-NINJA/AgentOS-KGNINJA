@@ -126,6 +126,11 @@ The command is read-only: it does not reveal the private attempt ID or payload,
 remove the claim, retry the call or promote output. A failed or ambiguous audit
 requires manual investigation; a passing audit still requires an explicit,
 separately reviewed reconciliation policy before any state change.
+The audit result includes the canonical unresolved-receipt SHA-256. It reads
+private files with no-follow descriptors, then re-opens and compares the exact
+bytes and file identities after validation. Any concurrent replacement, mode
+change, attempt-directory change or success-evidence promotion fails closed so an
+operator cannot receive a result assembled from different evidence snapshots.
 The preliminary single-model access probe must likewise re-run the stable CLI and
 coarse authentication checks after completion. Treat a mid-probe version or
 authentication change as blocked rather than recording successful access. Preserve

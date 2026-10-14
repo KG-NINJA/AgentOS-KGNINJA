@@ -642,6 +642,10 @@ raise SystemExit(99)
         self.assertNotIn("attempt_id", stdout.getvalue())
         self.assertNotIn("GPT6_ACCESS_PROBE_OK", stdout.getvalue())
         self.assertEqual(public["claim_sha256"], unresolved.summary["claim_sha256"])
+        self.assertEqual(
+            public["receipt_sha256"],
+            evaluation.kernel.digest(evaluation.kernel.load_json(Path(unresolved.receipt_path))),
+        )
         self.assertEqual(claim_path.read_bytes(), claim_before)
         self.assertEqual(sorted(str(path.relative_to(evidence))
                                 for path in evidence.rglob("*")), entries_before)
@@ -680,6 +684,29 @@ raise SystemExit(99)
             evaluation.audit_unresolved_attempt(
                 self.campaign_path, self.candidate_case_id, "candidate",
                 evidence)
+
+    def test_unresolved_audit_rejects_evidence_changed_during_validation(self):
+        evidence = self.root / "concurrent-evidence-change"
+        unresolved = self.makeUnresolvedAttempt(evidence)
+        receipt_path = Path(unresolved.receipt_path)
+        real_completion = evaluation._completion_evidence
+
+        def completion_then_replace(raw):
+            result = real_completion(raw)
+            receipt = evaluation.kernel.load_json(receipt_path)
+            receipt["latency_ms"] += 1
+            evaluation._write_private(receipt_path, receipt)
+            return result
+
+        with mock.patch.object(
+                evaluation, "_completion_evidence",
+                side_effect=completion_then_replace):
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "unresolved evidence changed during audit"):
+                evaluation.audit_unresolved_attempt(
+                    self.campaign_path, self.candidate_case_id, "candidate",
+                    evidence)
 
     def test_timeout_preserves_private_partial_evidence_without_counting_completion(self):
         slow = self.root / "slow-codex"
