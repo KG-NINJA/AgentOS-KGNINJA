@@ -847,6 +847,10 @@ def audit_unresolved_attempt(campaign_path: Path, case_id: str, side: str,
                   "private_stderr_stored"):
         if type(receipt[field]) is not bool:
             raise kernel.Rejected("unresolved receipt has invalid lifecycle flags")
+    if (not receipt["partial_stdout_stored"]
+            or not receipt["private_stderr_stored"]
+            or receipt["event_scan_truncated"]):
+        raise kernel.Rejected("unresolved evidence is incomplete for audit")
 
     expected_entries = {"receipt.json"}
     private_snapshots = {

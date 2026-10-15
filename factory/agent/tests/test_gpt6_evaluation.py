@@ -685,6 +685,41 @@ raise SystemExit(99)
                 self.campaign_path, self.candidate_case_id, "candidate",
                 evidence)
 
+    def test_unresolved_audit_rejects_unstored_stdout(self):
+        evidence = self.root / "unstored-stdout"
+        unresolved = self.makeUnresolvedAttempt(evidence)
+        receipt_path = Path(unresolved.receipt_path)
+        raw_path = Path(unresolved.raw_path)
+        receipt = evaluation.kernel.load_json(receipt_path)
+        receipt["stdout_bytes"] = evaluation.MAX_EVENT_STREAM_BYTES + 1
+        receipt["stdout_sha256"] = "0" * 64
+        receipt["event_scan_truncated"] = True
+        receipt["partial_stdout_stored"] = False
+        evaluation._write_private(receipt_path, receipt)
+        raw_path.unlink()
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "evidence is incomplete for audit"):
+            evaluation.audit_unresolved_attempt(
+                self.campaign_path, self.candidate_case_id, "candidate",
+                evidence)
+
+    def test_unresolved_audit_rejects_unstored_stderr(self):
+        evidence = self.root / "unstored-stderr"
+        unresolved = self.makeUnresolvedAttempt(evidence)
+        receipt_path = Path(unresolved.receipt_path)
+        stderr_path = Path(unresolved.stderr_path)
+        receipt = evaluation.kernel.load_json(receipt_path)
+        receipt["stderr_bytes"] = evaluation.MAX_EVENT_STREAM_BYTES + 1
+        receipt["stderr_sha256"] = "0" * 64
+        receipt["private_stderr_stored"] = False
+        evaluation._write_private(receipt_path, receipt)
+        stderr_path.unlink()
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "evidence is incomplete for audit"):
+            evaluation.audit_unresolved_attempt(
+                self.campaign_path, self.candidate_case_id, "candidate",
+                evidence)
+
     def test_unresolved_audit_rejects_evidence_changed_during_validation(self):
         evidence = self.root / "concurrent-evidence-change"
         unresolved = self.makeUnresolvedAttempt(evidence)

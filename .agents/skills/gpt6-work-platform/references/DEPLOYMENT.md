@@ -131,6 +131,9 @@ private files with no-follow descriptors, then re-opens and compares the exact
 bytes and file identities after validation. Any concurrent replacement, mode
 change, attempt-directory change or success-evidence promotion fails closed so an
 operator cannot receive a result assembled from different evidence snapshots.
+The audit also fails closed when bounded stdout or stderr was not retained; hashes
+copied into a receipt cannot substitute for re-reading the underlying evidence or
+re-validating the completed JSONL lifecycle.
 The preliminary single-model access probe must likewise re-run the stable CLI and
 coarse authentication checks after completion. Treat a mid-probe version or
 authentication change as blocked rather than recording successful access. Preserve
