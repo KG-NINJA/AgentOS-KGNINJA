@@ -1000,10 +1000,14 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
      predecessor_codex_version, predecessor_auth_surface,
      predecessor_observed_epoch) = \
         _require_first_side_evidence(campaign, case, side, evidence_dir)
-    if (predecessor_observed_epoch is not None
-            and time.time() - predecessor_observed_epoch
-            > campaign["max_pair_gap_seconds"]):
-        raise kernel.Rejected("campaign-selected pair observation window expired")
+    if predecessor_observed_epoch is not None:
+        current_epoch = time.time()
+        if current_epoch < predecessor_observed_epoch:
+            raise kernel.Rejected(
+                "campaign-selected first-side observation is in the future")
+        if (current_epoch - predecessor_observed_epoch
+                > campaign["max_pair_gap_seconds"]):
+            raise kernel.Rejected("campaign-selected pair observation window expired")
     verify_workspace(workspace, campaign["source_commit"])
     model = campaign[side + "_model"]
     version = _codex_version(executable)

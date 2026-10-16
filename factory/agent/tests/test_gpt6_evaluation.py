@@ -553,6 +553,29 @@ raise SystemExit(99)
         auth.assert_not_called()
         execute.assert_not_called()
 
+    def test_collect_rejects_future_first_side_before_runtime_checks(self):
+        evidence = self.root / "future-first-side"
+        case_id = self.baseline_case_id
+        evaluation.collect(self.campaign_path, case_id, "baseline", self.workspace,
+                           evidence, 10, str(self.fake))
+        receipt = evaluation.kernel.load_json(
+            evidence / f"{case_id}.baseline.receipt.json")
+        before_first_side = evaluation._observed_epoch(receipt["observed_at"]) - 1
+        with mock.patch.object(evaluation.time, "time", return_value=before_first_side), \
+                mock.patch.object(evaluation, "verify_workspace") as workspace, \
+                mock.patch.object(evaluation, "_codex_version") as version, \
+                mock.patch.object(evaluation, "_codex_auth_surface") as auth, \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "first-side observation is in the future"):
+                evaluation.collect(self.campaign_path, case_id, "candidate",
+                                   self.workspace, evidence, 10, str(self.fake))
+        workspace.assert_not_called()
+        version.assert_not_called()
+        auth.assert_not_called()
+        execute.assert_not_called()
+
     def test_second_side_receipt_binds_exact_first_side_evidence(self):
         evidence = self.root / "evidence"
         case_id = self.baseline_case_id

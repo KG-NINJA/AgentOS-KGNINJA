@@ -100,6 +100,9 @@ authentication surface with the validated first-side receipt. Reject either
 mismatch instead of collecting evidence that compilation must later discard.
 If the campaign's maximum pair-observation gap has already elapsed since that
 first-side receipt, stop before workspace, CLI, authentication or model checks.
+Stop at the same boundary when the first-side observation is later than the mate
+host's current UTC clock; clock rollback or a future-dated receipt cannot yield a
+directionally valid pair and must not consume a second inference.
 Atomically create a private `campaign-runtime.json` before the first inference and
 bind it to the campaign hash, stable Codex CLI version and coarse authentication
 surface. Reject every later case before inference if either runtime condition
