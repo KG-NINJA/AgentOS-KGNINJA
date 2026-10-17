@@ -58,3 +58,10 @@ assumptions and migration/rollback gates. Roll back the integration commit as a
 unit; removing only the kernel leaves the generator intentionally blocked. Keep
 historical evidence. No new approval, financial authority or external credentials
 are created by this implementation.
+
+## Actual Codex call routing
+
+The opt-in candidate route now reaches generator, interpreter and all three
+repair paths through a shared CLI helper. See [runtime routing](gpt6-runtime-routing.md)
+for exact activation state, offline checks, failure semantics and rollback.
+The separate Skill runtime-policy.json remains candidate intent.
