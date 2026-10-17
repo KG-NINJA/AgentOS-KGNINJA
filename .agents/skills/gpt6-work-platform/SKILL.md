@@ -76,6 +76,11 @@ not spend a model call on a pair that cannot satisfy compilation.
 Reject a first-side observation that is later than the mate host's current UTC
 clock before those checks as well. A clock rollback or future-dated receipt cannot
 produce a directionally valid pair and must not consume the second model call.
+Require enough time to remain in that observation window for the mate's complete
+campaign-fixed timeout. Check this both before runtime checks and immediately before
+the attempt claim; preflight delay must not turn an otherwise equal timeout into an
+invalid or shorter second-side condition. Reject a campaign whose pair window is
+shorter than its fixed timeout because no mate can satisfy that configuration.
 Before any model call, atomically bind the whole campaign to one stable Codex CLI
 version and coarse authentication surface. Every later case must match that private,
 campaign-hash-bound runtime lock before inference. For legacy evidence without the

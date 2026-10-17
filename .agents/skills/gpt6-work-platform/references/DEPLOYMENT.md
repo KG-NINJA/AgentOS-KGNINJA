@@ -103,6 +103,11 @@ first-side receipt, stop before workspace, CLI, authentication or model checks.
 Stop at the same boundary when the first-side observation is later than the mate
 host's current UTC clock; clock rollback or a future-dated receipt cannot yield a
 directionally valid pair and must not consume a second inference.
+The remaining observation window must also accommodate the mate's complete frozen
+timeout. Check this before runtime inspection and again immediately before claiming
+the attempt, so preflight delay cannot spend a call under a shortened or necessarily
+invalid comparison condition. Reject the campaign itself when its maximum pair gap
+is shorter than its fixed timeout.
 Atomically create a private `campaign-runtime.json` before the first inference and
 bind it to the campaign hash, stable Codex CLI version and coarse authentication
 surface. Reject every later case before inference if either runtime condition

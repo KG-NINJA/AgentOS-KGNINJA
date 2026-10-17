@@ -194,6 +194,9 @@ def load_campaign(path: Path) -> dict[str, Any]:
     if (type(data["max_pair_gap_seconds"]) is not int
             or not 1 <= data["max_pair_gap_seconds"] <= 21_600):
         raise kernel.Rejected("max_pair_gap_seconds must be 1..21600")
+    if data["max_pair_gap_seconds"] < data["timeout_seconds"]:
+        raise kernel.Rejected(
+            "max_pair_gap_seconds must be at least timeout_seconds")
     if type(data["source_commit"]) is not str or not COMMIT.fullmatch(data["source_commit"]):
         raise kernel.Rejected("source_commit must be a full Git object id")
     cases = data["cases"]
@@ -283,6 +286,23 @@ def _observed_epoch(value: Any) -> float:
     if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != value:
         raise kernel.Rejected("receipt has invalid observation time")
     return parsed.timestamp()
+
+
+def _require_mate_window(predecessor_observed_epoch: float | None,
+                         current_epoch: float, max_pair_gap_seconds: int,
+                         timeout_seconds: int) -> None:
+    """Require enough directed observation time for the mate's fixed timeout."""
+    if predecessor_observed_epoch is None:
+        return
+    if current_epoch < predecessor_observed_epoch:
+        raise kernel.Rejected(
+            "campaign-selected first-side observation is in the future")
+    if current_epoch - predecessor_observed_epoch > max_pair_gap_seconds:
+        raise kernel.Rejected("campaign-selected pair observation window expired")
+    if current_epoch + timeout_seconds > (predecessor_observed_epoch
+                                           + max_pair_gap_seconds):
+        raise kernel.Rejected(
+            "campaign-selected pair observation window cannot accommodate fixed timeout")
 
 
 def verify_workspace(workspace: Path, source_commit: str) -> None:
@@ -1000,14 +1020,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
      predecessor_codex_version, predecessor_auth_surface,
      predecessor_observed_epoch) = \
         _require_first_side_evidence(campaign, case, side, evidence_dir)
-    if predecessor_observed_epoch is not None:
-        current_epoch = time.time()
-        if current_epoch < predecessor_observed_epoch:
-            raise kernel.Rejected(
-                "campaign-selected first-side observation is in the future")
-        if (current_epoch - predecessor_observed_epoch
-                > campaign["max_pair_gap_seconds"]):
-            raise kernel.Rejected("campaign-selected pair observation window expired")
+    _require_mate_window(predecessor_observed_epoch, time.time(),
+                         campaign["max_pair_gap_seconds"], timeout_seconds)
     verify_workspace(workspace, campaign["source_commit"])
     model = campaign[side + "_model"]
     version = _codex_version(executable)
@@ -1019,6 +1033,11 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
     if predecessor_auth_surface is not None and auth_surface != predecessor_auth_surface:
         raise kernel.Rejected("mate authentication surface differs from campaign-selected first side")
     _bind_campaign_runtime(campaign, evidence_dir, version, auth_surface)
+    # Workspace, CLI, authentication and lock checks take time. Re-evaluate at the
+    # last pre-claim boundary so the mate still receives the campaign-fixed timeout
+    # without necessarily exceeding the directed observation window.
+    _require_mate_window(predecessor_observed_epoch, time.time(),
+                         campaign["max_pair_gap_seconds"], timeout_seconds)
     stem = case_id + "." + side
     lock_path, claim = _claim_attempt(
         evidence_dir, stem, kernel.digest(campaign), case_id, side)

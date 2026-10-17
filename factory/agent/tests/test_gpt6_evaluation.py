@@ -173,6 +173,11 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
                 with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                             "max_pair_gap_seconds must be"):
                     evaluation.load_campaign(path)
+        path.write_text(json.dumps(dict(self.campaign, timeout_seconds=11,
+                                        max_pair_gap_seconds=10)))
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "max_pair_gap_seconds must be at least timeout_seconds"):
+            evaluation.load_campaign(path)
         unbalanced = json.loads(json.dumps(self.campaign))
         for case in unbalanced["cases"]:
             case["first_side"] = "baseline"
@@ -574,6 +579,62 @@ raise SystemExit(99)
         workspace.assert_not_called()
         version.assert_not_called()
         auth.assert_not_called()
+        execute.assert_not_called()
+
+    def test_collect_rejects_mate_without_full_fixed_timeout_before_runtime_checks(self):
+        evidence = self.root / "insufficient-pair-window"
+        case_id = self.baseline_case_id
+        evaluation.collect(self.campaign_path, case_id, "baseline", self.workspace,
+                           evidence, 10, str(self.fake))
+        receipt = evaluation.kernel.load_json(
+            evidence / f"{case_id}.baseline.receipt.json")
+        first_observed = evaluation._observed_epoch(receipt["observed_at"])
+        insufficient_now = (first_observed
+                            + self.campaign["max_pair_gap_seconds"] - 9.5)
+        with mock.patch.object(evaluation.time, "time", return_value=insufficient_now), \
+                mock.patch.object(evaluation, "verify_workspace") as workspace, \
+                mock.patch.object(evaluation, "_codex_version") as version, \
+                mock.patch.object(evaluation, "_codex_auth_surface") as auth, \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "pair observation window cannot accommodate fixed timeout"):
+                evaluation.collect(self.campaign_path, case_id, "candidate",
+                                   self.workspace, evidence, 10, str(self.fake))
+        workspace.assert_not_called()
+        version.assert_not_called()
+        auth.assert_not_called()
+        execute.assert_not_called()
+
+    def test_collect_rechecks_mate_window_immediately_before_claim(self):
+        evidence = self.root / "pair-window-closes-during-preflight"
+        case_id = self.baseline_case_id
+        evaluation.collect(self.campaign_path, case_id, "baseline", self.workspace,
+                           evidence, 10, str(self.fake))
+        receipt = evaluation.kernel.load_json(
+            evidence / f"{case_id}.baseline.receipt.json")
+        first_observed = evaluation._observed_epoch(receipt["observed_at"])
+        limit = first_observed + self.campaign["max_pair_gap_seconds"] - 10
+        with mock.patch.object(evaluation.time, "time",
+                               side_effect=(limit - 1, limit + 0.1)), \
+                mock.patch.object(evaluation, "verify_workspace") as workspace, \
+                mock.patch.object(evaluation, "_codex_version",
+                                  return_value="codex-cli 9.9.9") as version, \
+                mock.patch.object(evaluation, "_codex_auth_surface",
+                                  return_value="chatgpt") as auth, \
+                mock.patch.object(evaluation, "_bind_campaign_runtime") as bind, \
+                mock.patch.object(evaluation, "_claim_attempt") as claim, \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "pair observation window cannot accommodate fixed timeout"):
+                evaluation.collect(self.campaign_path, case_id, "candidate",
+                                   self.workspace, evidence, 10, str(self.fake))
+        workspace.assert_called_once()
+        version.assert_called_once()
+        auth.assert_called_once()
+        bind.assert_called_once()
+        claim.assert_not_called()
         execute.assert_not_called()
 
     def test_second_side_receipt_binds_exact_first_side_evidence(self):
