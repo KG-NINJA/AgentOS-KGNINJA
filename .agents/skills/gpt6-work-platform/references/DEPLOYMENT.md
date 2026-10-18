@@ -108,6 +108,11 @@ timeout. Check this before runtime inspection and again immediately before claim
 the attempt, so preflight delay cannot spend a call under a shortened or necessarily
 invalid comparison condition. Reject the campaign itself when its maximum pair gap
 is shorter than its fixed timeout.
+Immediately before the final time check and attempt claim, re-open and fully
+re-validate the first-side receipt and raw lifecycle. Its receipt hash, event-stream
+hash, runtime conditions and observation time must exactly match the snapshot that
+authorized the start of mate preflight. Any replacement or invalidation during the
+workspace/runtime checks stops before inference.
 Atomically create a private `campaign-runtime.json` before the first inference and
 bind it to the campaign hash, stable Codex CLI version and coarse authentication
 surface. Reject every later case before inference if either runtime condition

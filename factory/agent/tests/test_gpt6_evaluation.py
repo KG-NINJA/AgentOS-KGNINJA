@@ -637,6 +637,35 @@ raise SystemExit(99)
         claim.assert_not_called()
         execute.assert_not_called()
 
+    def test_collect_revalidates_exact_first_side_evidence_before_claim(self):
+        evidence = self.root / "predecessor-changes-during-preflight"
+        case_id = self.baseline_case_id
+        evaluation.collect(self.campaign_path, case_id, "baseline", self.workspace,
+                           evidence, 10, str(self.fake))
+        first_path = evidence / f"{case_id}.baseline.receipt.json"
+
+        def replace_predecessor(*_args):
+            receipt = evaluation.kernel.load_json(first_path)
+            receipt["latency_ms"] += 1
+            first_path.write_bytes(evaluation.kernel.canonical(receipt) + b"\n")
+
+        with mock.patch.object(evaluation, "_codex_version",
+                               return_value="codex-cli 9.9.9"), \
+                mock.patch.object(evaluation, "_codex_auth_surface",
+                                  return_value="chatgpt"), \
+                mock.patch.object(evaluation, "_bind_campaign_runtime",
+                                  side_effect=replace_predecessor) as bind, \
+                mock.patch.object(evaluation, "_claim_attempt") as claim, \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "first-side evidence changed during preflight"):
+                evaluation.collect(self.campaign_path, case_id, "candidate",
+                                   self.workspace, evidence, 10, str(self.fake))
+        bind.assert_called_once()
+        claim.assert_not_called()
+        execute.assert_not_called()
+
     def test_second_side_receipt_binds_exact_first_side_evidence(self):
         evidence = self.root / "evidence"
         case_id = self.baseline_case_id

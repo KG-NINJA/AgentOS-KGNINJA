@@ -1033,6 +1033,23 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
     if predecessor_auth_surface is not None and auth_surface != predecessor_auth_surface:
         raise kernel.Rejected("mate authentication surface differs from campaign-selected first side")
     _bind_campaign_runtime(campaign, evidence_dir, version, auth_surface)
+    # The predecessor files are operator-owned and live outside the measured
+    # checkout. Re-open and re-validate them after runtime preflight so a
+    # concurrent replacement cannot authorize the mate with one snapshot and
+    # later bind its receipt to another.
+    predecessor = (predecessor_receipt_sha256, predecessor_event_stream_sha256,
+                   predecessor_codex_version, predecessor_auth_surface,
+                   predecessor_observed_epoch)
+    try:
+        revalidated_predecessor = _require_first_side_evidence(
+            campaign, case, side, evidence_dir)
+    except kernel.Rejected as exc:
+        raise kernel.Rejected(
+            "campaign-selected first-side evidence changed during preflight") from exc
+    if revalidated_predecessor != predecessor:
+        raise kernel.Rejected(
+            "campaign-selected first-side evidence changed during preflight")
+    predecessor_observed_epoch = revalidated_predecessor[4]
     # Workspace, CLI, authentication and lock checks take time. Re-evaluate at the
     # last pre-claim boundary so the mate still receives the campaign-fixed timeout
     # without necessarily exceeding the directed observation window.

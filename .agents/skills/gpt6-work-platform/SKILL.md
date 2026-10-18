@@ -81,6 +81,11 @@ campaign-fixed timeout. Check this both before runtime checks and immediately be
 the attempt claim; preflight delay must not turn an otherwise equal timeout into an
 invalid or shorter second-side condition. Reject a campaign whose pair window is
 shorter than its fixed timeout because no mate can satisfy that configuration.
+Immediately before that final time check and attempt claim, re-open and fully
+re-validate the selected first-side receipt and raw lifecycle. Require the exact
+receipt hash, event-stream hash, runtime conditions and observation time validated
+at the start of preflight; a predecessor replacement during workspace/runtime
+checks must stop before the mate model call.
 Before any model call, atomically bind the whole campaign to one stable Codex CLI
 version and coarse authentication surface. Every later case must match that private,
 campaign-hash-bound runtime lock before inference. For legacy evidence without the
