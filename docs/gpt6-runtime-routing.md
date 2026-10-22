@@ -206,7 +206,10 @@ must discard. Compilation independently rechecks the same campaign-wide conditio
 Mate collection also compares the current UTC time with the validated first-side
 observation. If the frozen maximum pair gap has already elapsed, it stops before
 workspace, CLI, authentication or inference checks. The compiler remains the final
-authority for the exact completed pair timestamps.
+authority for the exact completed pair timestamps. The collector now captures the
+model-process completion time and rechecks the directed window before promotion.
+If completion is outside the frozen window, the bounded output is retained under
+`unresolved/` with its claim and no comparable success receipt is created.
 Receipt schema v13 binds every mate run to the exact first-side receipt and raw
 event stream that authorized it. Retain v12 receipts as historical evidence rather
 than inferring this missing predecessor binding after execution.

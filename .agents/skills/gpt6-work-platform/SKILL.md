@@ -81,6 +81,10 @@ campaign-fixed timeout. Check this both before runtime checks and immediately be
 the attempt claim; preflight delay must not turn an otherwise equal timeout into an
 invalid or shorter second-side condition. Reject a campaign whose pair window is
 shorter than its fixed timeout because no mate can satisfy that configuration.
+After the model process completes, record that completion observation time and
+recheck the directed pair window before promoting the output. A wall-clock jump or
+completion outside the frozen window leaves private unresolved evidence and the
+attempt claim for reconciliation; it must not become comparable success evidence.
 Immediately before that final time check and attempt claim, re-open and fully
 re-validate the selected first-side receipt and raw lifecycle. Require the exact
 receipt hash, event-stream hash, runtime conditions and observation time validated

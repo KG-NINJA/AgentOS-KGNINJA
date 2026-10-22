@@ -108,6 +108,10 @@ timeout. Check this before runtime inspection and again immediately before claim
 the attempt, so preflight delay cannot spend a call under a shortened or necessarily
 invalid comparison condition. Reject the campaign itself when its maximum pair gap
 is shorter than its fixed timeout.
+Capture the model-process completion time and recheck the directed pair window
+before success evidence is written. If the clock moves or the mate completes outside
+that window, retain its bounded output as unresolved evidence with the atomic claim;
+do not promote it into the campaign or retry it automatically.
 Immediately before the final time check and attempt claim, re-open and fully
 re-validate the first-side receipt and raw lifecycle. Its receipt hash, event-stream
 hash, runtime conditions and observation time must exactly match the snapshot that

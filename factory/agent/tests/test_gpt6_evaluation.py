@@ -637,6 +637,52 @@ raise SystemExit(99)
         claim.assert_not_called()
         execute.assert_not_called()
 
+    def test_collect_does_not_promote_mate_completed_outside_pair_window(self):
+        evidence = self.root / "pair-window-closes-during-execution"
+        case_id = self.baseline_case_id
+        evaluation.collect(self.campaign_path, case_id, "baseline", self.workspace,
+                           evidence, 10, str(self.fake))
+        receipt = evaluation.kernel.load_json(
+            evidence / f"{case_id}.baseline.receipt.json")
+        first_observed = evaluation._observed_epoch(receipt["observed_at"])
+        latest_start = (first_observed
+                        + self.campaign["max_pair_gap_seconds"] - 10)
+        completed_outside = (first_observed
+                             + self.campaign["max_pair_gap_seconds"] + 1)
+        with mock.patch.object(
+                evaluation.time, "time",
+                side_effect=(latest_start - 1, latest_start, completed_outside)):
+            with self.assertRaises(evaluation.CodexRunUnresolved) as raised:
+                evaluation.collect(self.campaign_path, case_id, "candidate",
+                                   self.workspace, evidence, 10, str(self.fake))
+        self.assertUnresolvedAttempt(
+            raised, evidence, case_id, "candidate",
+            "post-execution-pair-window-revalidation-failed")
+        self.assertFalse((evidence / f"{case_id}.candidate.jsonl").exists())
+        self.assertFalse(
+            (evidence / f"{case_id}.candidate.receipt.json").exists())
+        self.assertEqual(
+            evaluation._observed_epoch(raised.exception.summary["observed_at"]),
+            completed_outside)
+        audit = evaluation.audit_unresolved_attempt(
+            self.campaign_path, case_id, "candidate", evidence)
+        self.assertEqual(audit["status"], "unresolved_verified")
+        self.assertEqual(
+            audit["reason"],
+            "post-execution-pair-window-revalidation-failed")
+
+    def test_success_receipt_uses_model_completion_observation_time(self):
+        evidence = self.root / "fixed-completion-observation"
+        completed_at = 1_700_000_000.0
+        with mock.patch.object(evaluation.time, "time", return_value=completed_at):
+            output = evaluation.collect(
+                self.campaign_path, self.candidate_case_id, "candidate",
+                self.workspace, evidence, 10, str(self.fake))
+        self.assertEqual(
+            output["observed_at"],
+            evaluation.time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", evaluation.time.gmtime(completed_at)))
+
     def test_collect_revalidates_exact_first_side_evidence_before_claim(self):
         evidence = self.root / "predecessor-changes-during-preflight"
         case_id = self.baseline_case_id

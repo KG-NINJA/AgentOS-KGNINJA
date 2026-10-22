@@ -305,6 +305,20 @@ def _require_mate_window(predecessor_observed_epoch: float | None,
             "campaign-selected pair observation window cannot accommodate fixed timeout")
 
 
+def _require_mate_completion_window(predecessor_observed_epoch: float | None,
+                                    completed_epoch: float,
+                                    max_pair_gap_seconds: int) -> None:
+    """Require the completed mate to remain in the directed observation window."""
+    if predecessor_observed_epoch is None:
+        return
+    if completed_epoch < predecessor_observed_epoch:
+        raise kernel.Rejected(
+            "campaign-selected first-side observation is in the future")
+    if completed_epoch - predecessor_observed_epoch > max_pair_gap_seconds:
+        raise kernel.Rejected(
+            "completed mate exceeded campaign-selected pair observation window")
+
+
 def verify_workspace(workspace: Path, source_commit: str) -> None:
     root = workspace.resolve(strict=True)
     head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
@@ -663,7 +677,7 @@ def _preserve_unresolved_attempt(
         evidence_dir: Path, stem: str, model: str, version: str,
         auth_surface: str, timeout_seconds: int, summary: dict[str, Any],
         raw_stdout: bytes, raw_stderr: bytes, reason: str,
-        claim: dict[str, Any]) -> CodexRunUnresolved:
+        claim: dict[str, Any], observed_epoch: float) -> CodexRunUnresolved:
     """Retain a completed but unpromotable call without resolving its claim."""
     attempt_dir = _unresolved_attempt_dir(evidence_dir, stem)
     raw_path = attempt_dir / "stdout.jsonl"
@@ -699,7 +713,8 @@ def _preserve_unresolved_attempt(
         "claim_sha256": kernel.digest(claim),
         "partial_stdout_stored": raw_stored,
         "private_stderr_stored": stderr_stored,
-        "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "observed_at": time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(observed_epoch)),
     }
     _write_private(receipt_path, receipt)
     exc = CodexRunUnresolved(receipt, raw_stdout, raw_stderr)
@@ -822,6 +837,7 @@ def audit_unresolved_attempt(campaign_path: Path, case_id: str, side: str,
         "observed_at",
     }
     allowed_reasons = {
+        "post-execution-pair-window-revalidation-failed",
         "post-execution-runtime-revalidation-failed",
         "post-execution-workspace-revalidation-failed",
     }
@@ -1101,6 +1117,17 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
             exc.stderr_path = str(stderr_path) if stderr_stored else None
             resolved = True
             raise
+        completed_observed_epoch = time.time()
+        try:
+            _require_mate_completion_window(
+                predecessor_observed_epoch, completed_observed_epoch,
+                campaign["max_pair_gap_seconds"])
+        except kernel.Rejected as exc:
+            raise _preserve_unresolved_attempt(
+                campaign, case, side, evidence_dir, stem, model, version,
+                auth_surface, timeout_seconds, summary, raw, stderr,
+                "post-execution-pair-window-revalidation-failed", claim,
+                completed_observed_epoch) from exc
         try:
             _revalidate_campaign_runtime_after_execution(
                 campaign, evidence_dir, executable, version, auth_surface)
@@ -1110,7 +1137,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
             raise _preserve_unresolved_attempt(
                 campaign, case, side, evidence_dir, stem, model, version,
                 auth_surface, timeout_seconds, summary, raw, stderr,
-                "post-execution-runtime-revalidation-failed", claim) from exc
+                "post-execution-runtime-revalidation-failed", claim,
+                completed_observed_epoch) from exc
         # A concurrent local mutation can change what the read-only model saw.
         # Recheck after completion before promoting the output to success evidence.
         try:
@@ -1119,7 +1147,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
             raise _preserve_unresolved_attempt(
                 campaign, case, side, evidence_dir, stem, model, version,
                 auth_surface, timeout_seconds, summary, raw, stderr,
-                "post-execution-workspace-revalidation-failed", claim) from exc
+                "post-execution-workspace-revalidation-failed", claim,
+                completed_observed_epoch) from exc
         raw_path = evidence_dir / (stem + ".jsonl")
         receipt_path = evidence_dir / (stem + ".receipt.json")
         _write_private_bytes(raw_path, raw)
@@ -1133,7 +1162,9 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
                    "prompt_sha256": _sha_bytes(case["prompt"].encode()),
                    "source_commit": campaign["source_commit"], "codex_version": version,
                    "auth_surface": auth_surface,
-                   "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                   "observed_at": time.strftime(
+                       "%Y-%m-%dT%H:%M:%SZ",
+                       time.gmtime(completed_observed_epoch)),
                    "predecessor_receipt_sha256": predecessor_receipt_sha256,
                    "predecessor_event_stream_sha256": predecessor_event_stream_sha256,
                    "provider_model_identity_verified": False, **summary}
