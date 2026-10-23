@@ -447,10 +447,11 @@ def _validated_completed_evidence(campaign: dict[str, Any], case: dict[str, Any]
     """Load one completed run and re-derive its evidence-bound fields."""
     receipt_path = evidence_dir / f"{case['id']}.{side}.receipt.json"
     raw_path = evidence_dir / f"{case['id']}.{side}.jsonl"
-    if (evidence_dir.is_symlink() or receipt_path.is_symlink() or raw_path.is_symlink()
-            or not receipt_path.is_file() or not raw_path.is_file()):
-        raise kernel.Rejected("completed evidence paths are invalid")
-    receipt = kernel.load_json(receipt_path)
+    receipt_snapshot = _private_file_snapshot(
+        receipt_path, 0o600, kernel.MAX_BYTES, "completed evidence")
+    raw_snapshot = _private_file_snapshot(
+        raw_path, 0o600, MAX_EVENT_STREAM_BYTES, "completed evidence")
+    receipt = kernel.parse_json(receipt_snapshot[0])
     expected = {"schema_version", "campaign_sha256", "case_id", "side", "pair_order", "category",
                 "requested_model", "requested_effort", "budget_id", "input_sha256",
                 "timeout_seconds", "max_pair_gap_seconds", "prompt_sha256", "source_commit",
@@ -493,13 +494,19 @@ def _validated_completed_evidence(campaign: dict[str, Any], case: dict[str, Any]
             != predecessor_event_stream_sha256):
         raise kernel.Rejected("receipt predecessor evidence does not match")
     _validated_codex_version(receipt["codex_version"])
-    raw = raw_path.read_bytes()
+    raw = raw_snapshot[0]
     completion, final_message = _completion_evidence(raw)
     if _sha_bytes(raw) != receipt["event_stream_sha256"]:
         raise kernel.Rejected("raw event evidence does not match receipt")
     for field, value in completion.items():
         if receipt[field] != value:
             raise kernel.Rejected("receipt completion metrics do not match raw evidence")
+    _require_unchanged_private_snapshot(
+        receipt_path, 0o600, kernel.MAX_BYTES, receipt_snapshot,
+        "completed evidence")
+    _require_unchanged_private_snapshot(
+        raw_path, 0o600, MAX_EVENT_STREAM_BYTES, raw_snapshot,
+        "completed evidence")
     return receipt, final_message
 
 
@@ -724,27 +731,30 @@ def _preserve_unresolved_attempt(
     return exc
 
 
-def _private_file_snapshot(path: Path, mode: int, limit: int) -> tuple[bytes, tuple[int, ...]]:
+def _private_file_snapshot(path: Path, mode: int, limit: int,
+                           context: str = "unresolved evidence"
+                           ) -> tuple[bytes, tuple[int, ...]]:
     """Read one private regular file through a no-follow descriptor."""
+    phase = "audit" if context == "unresolved evidence" else "validation"
     try:
         descriptor = os.open(
             path,
             os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
         )
     except OSError as exc:
-        raise kernel.Rejected("unresolved evidence path is invalid") from exc
+        raise kernel.Rejected(f"{context} path is invalid") from exc
     try:
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode):
-            raise kernel.Rejected("unresolved evidence path is invalid")
+            raise kernel.Rejected(f"{context} path is invalid")
         if stat.S_IMODE(info.st_mode) != mode:
-            raise kernel.Rejected("unresolved evidence permissions are invalid")
+            raise kernel.Rejected(f"{context} permissions are invalid")
         with os.fdopen(descriptor, "rb", closefd=False) as handle:
             payload = handle.read(limit + 1)
         if len(payload) > limit:
-            raise kernel.Rejected("unresolved evidence byte limit")
+            raise kernel.Rejected(f"{context} byte limit")
         if len(payload) != info.st_size:
-            raise kernel.Rejected("unresolved evidence changed during audit")
+            raise kernel.Rejected(f"{context} changed during {phase}")
         identity = (info.st_dev, info.st_ino, info.st_size,
                     info.st_mtime_ns, info.st_ctime_ns)
         return payload, identity
@@ -754,14 +764,17 @@ def _private_file_snapshot(path: Path, mode: int, limit: int) -> tuple[bytes, tu
 
 def _require_unchanged_private_snapshot(
         path: Path, mode: int, limit: int,
-        expected: tuple[bytes, tuple[int, ...]]) -> None:
+        expected: tuple[bytes, tuple[int, ...]],
+        context: str = "unresolved evidence") -> None:
     """Fail closed when evidence changed after it was first validated."""
     try:
-        current = _private_file_snapshot(path, mode, limit)
+        current = _private_file_snapshot(path, mode, limit, context)
     except (kernel.Rejected, OSError) as exc:
-        raise kernel.Rejected("unresolved evidence changed during audit") from exc
+        phase = "audit" if context == "unresolved evidence" else "validation"
+        raise kernel.Rejected(f"{context} changed during {phase}") from exc
     if current != expected:
-        raise kernel.Rejected("unresolved evidence changed during audit")
+        phase = "audit" if context == "unresolved evidence" else "validation"
+        raise kernel.Rejected(f"{context} changed during {phase}")
 
 
 def _private_directory_snapshot(path: Path, mode: int) -> tuple[int, ...]:

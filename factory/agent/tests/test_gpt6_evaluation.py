@@ -740,6 +740,30 @@ raise SystemExit(99)
             evaluation._validated_completed_evidence(
                 self.campaign, case, "candidate", evidence)
 
+    def test_completed_evidence_replacement_during_validation_is_rejected(self):
+        evidence = self.root / "completed-evidence-snapshot"
+        case_id = self.baseline_case_id
+        evaluation.collect(self.campaign_path, case_id, "baseline", self.workspace,
+                           evidence, 10, str(self.fake))
+        case = evaluation._case(self.campaign, case_id)
+        receipt_path = evidence / f"{case_id}.baseline.receipt.json"
+        original_receipt = receipt_path.read_bytes()
+        real_completion = evaluation._completion_evidence
+
+        def completion_then_replace(raw):
+            completion = real_completion(raw)
+            # Preserve the bytes but replace the inode while validation is in flight.
+            evaluation._write_private_bytes(receipt_path, original_receipt)
+            return completion
+
+        with mock.patch.object(evaluation, "_completion_evidence",
+                               side_effect=completion_then_replace):
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "completed evidence changed during validation"):
+                evaluation._validated_completed_evidence(
+                    self.campaign, case, "baseline", evidence)
+
     def test_mate_receipt_observation_must_follow_campaign_first_side(self):
         for case_id in (self.baseline_case_id, self.candidate_case_id):
             with self.subTest(case_id=case_id):

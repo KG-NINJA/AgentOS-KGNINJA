@@ -176,6 +176,11 @@ completion the final stored event; prefix or suffix events make the stream
 ineligible, while item events remain allowed inside the lifecycle.
 Parse JSONL as strict finite JSON: duplicate object keys and `NaN`/infinite values
 are malformed evidence, including in fields not otherwise used by the compiler.
+Completed receipt and raw JSONL validation uses private no-follow descriptors,
+bounded reads and exact file snapshots. Re-open both files after lifecycle and
+schema checks and reject changed bytes, identity or mode, including a byte-identical
+replacement, so mate preflight, grading preparation and compilation cannot accept
+evidence assembled from different filesystem snapshots.
 Every case/side must also have a distinct event-stream hash. Reusing one raw JSONL
 as more than one execution is ineligible before blind grading and at compilation.
 Every case/side must also have a distinct Codex thread ID. Byte-distinct JSONL that

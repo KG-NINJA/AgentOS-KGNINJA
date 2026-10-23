@@ -147,6 +147,11 @@ that lifecycle while allowing documented item events inside it.
 Parse every JSONL event through the same strict finite-JSON boundary used for
 receipts. Duplicate object keys or non-finite numbers make the event ambiguous and
 must block collection rather than inherit parser-specific meaning.
+Open completed receipts and raw JSONL through private no-follow descriptors and
+retain their exact bytes, identity and mode while validating them. Re-open both
+files before returning the validated result and reject even a byte-identical inode
+replacement or permission change; mate authorization, blind grading and compilation
+must not consume a mixed snapshot assembled during concurrent replacement.
 Require a unique event-stream hash for every case/side execution in the campaign.
 The same stored JSONL cannot count as multiple distinct completed runs even when
 case-specific receipt fields are rewritten around it.
