@@ -445,6 +445,7 @@ def _validated_completed_evidence(campaign: dict[str, Any], case: dict[str, Any]
                                   side: str, evidence_dir: Path
                                   ) -> tuple[dict[str, Any], str]:
     """Load one completed run and re-derive its evidence-bound fields."""
+    _private_directory_snapshot(evidence_dir, 0o700, "completed evidence")
     receipt_path = evidence_dir / f"{case['id']}.{side}.receipt.json"
     raw_path = evidence_dir / f"{case['id']}.{side}.jsonl"
     receipt_snapshot = _private_file_snapshot(
@@ -777,7 +778,9 @@ def _require_unchanged_private_snapshot(
         raise kernel.Rejected(f"{context} changed during {phase}")
 
 
-def _private_directory_snapshot(path: Path, mode: int) -> tuple[int, ...]:
+def _private_directory_snapshot(path: Path, mode: int,
+                                context: str = "unresolved evidence"
+                                ) -> tuple[int, ...]:
     """Open one private directory without following its final component."""
     try:
         descriptor = os.open(
@@ -786,13 +789,13 @@ def _private_directory_snapshot(path: Path, mode: int) -> tuple[int, ...]:
             | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
         )
     except OSError as exc:
-        raise kernel.Rejected("unresolved evidence path is invalid") from exc
+        raise kernel.Rejected(f"{context} path is invalid") from exc
     try:
         info = os.fstat(descriptor)
         if not stat.S_ISDIR(info.st_mode):
-            raise kernel.Rejected("unresolved evidence path is invalid")
+            raise kernel.Rejected(f"{context} path is invalid")
         if stat.S_IMODE(info.st_mode) != mode:
-            raise kernel.Rejected("unresolved evidence permissions are invalid")
+            raise kernel.Rejected(f"{context} permissions are invalid")
         return (info.st_dev, info.st_ino, info.st_mode,
                 info.st_mtime_ns, info.st_ctime_ns)
     finally:

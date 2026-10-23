@@ -764,6 +764,20 @@ raise SystemExit(99)
                 evaluation._validated_completed_evidence(
                     self.campaign, case, "baseline", evidence)
 
+    def test_completed_evidence_symlinked_directory_is_rejected(self):
+        evidence = self.root / "completed-evidence-real"
+        case_id = self.baseline_case_id
+        evaluation.collect(self.campaign_path, case_id, "baseline", self.workspace,
+                           evidence, 10, str(self.fake))
+        alias = self.root / "completed-evidence-alias"
+        alias.symlink_to(evidence, target_is_directory=True)
+        case = evaluation._case(self.campaign, case_id)
+
+        with self.assertRaisesRegex(evaluation.kernel.Rejected,
+                                    "completed evidence path is invalid"):
+            evaluation._validated_completed_evidence(
+                self.campaign, case, "baseline", alias)
+
     def test_mate_receipt_observation_must_follow_campaign_first_side(self):
         for case_id in (self.baseline_case_id, self.candidate_case_id):
             with self.subTest(case_id=case_id):
