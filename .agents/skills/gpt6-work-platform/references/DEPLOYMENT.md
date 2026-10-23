@@ -81,9 +81,117 @@ model performance improvement is established by these software tests.
 runtime-policy.json is candidate intent, not active deployment configuration.
 Keep the verified runtime until account/model access and actual response IDs are
 checked independently, then freeze at least 30 distinct completed paired tasks
-across research, coding, files, tool routing and safety. Match data/tools/budgets
-and effective effort; record source receipts, prompt/input hashes, safety,
-correctness, evidence coverage, latency, input tokens and cost.
+across research, coding, files, tool routing and safety. Match data/tools/budgets,
+execution timeouts, effective effort and a campaign-fixed maximum observation gap
+for every baseline/candidate pair; record source receipts, prompt/input hashes,
+safety, correctness, evidence coverage, latency, input tokens, output tokens and
+their non-overlapping total. Use input plus output tokens for the migration gate;
+do not treat lower input tokens as efficiency when output growth makes the full
+run larger. Record cost only from independently verifiable,
+authentication-surface-appropriate per-run billing
+evidence; otherwise mark it unavailable and exclude it from improvement eligibility.
+Counterbalance baseline-first and candidate-first cases (counts may differ by at
+most one), and complete the campaign-selected first side before its mate starts.
+The mate-side preflight must re-validate the first side's exact campaign-bound
+receipt schema and re-derive its strict completed lifecycle from raw JSONL. A
+matching file hash and `completed: true` field alone do not satisfy execution order.
+Before mate inference, compare its current Codex CLI version and coarse
+authentication surface with the validated first-side receipt. Reject either
+mismatch instead of collecting evidence that compilation must later discard.
+If the campaign's maximum pair-observation gap has already elapsed since that
+first-side receipt, stop before workspace, CLI, authentication or model checks.
+Stop at the same boundary when the first-side observation is later than the mate
+host's current UTC clock; clock rollback or a future-dated receipt cannot yield a
+directionally valid pair and must not consume a second inference.
+The remaining observation window must also accommodate the mate's complete frozen
+timeout. Check this before runtime inspection and again immediately before claiming
+the attempt, so preflight delay cannot spend a call under a shortened or necessarily
+invalid comparison condition. Reject the campaign itself when its maximum pair gap
+is shorter than its fixed timeout.
+Capture the model-process completion time and recheck the directed pair window
+before success evidence is written. If the clock moves or the mate completes outside
+that window, retain its bounded output as unresolved evidence with the atomic claim;
+do not promote it into the campaign or retry it automatically.
+Immediately before the final time check and attempt claim, re-open and fully
+re-validate the first-side receipt and raw lifecycle. Its receipt hash, event-stream
+hash, runtime conditions and observation time must exactly match the snapshot that
+authorized the start of mate preflight. Any replacement or invalidation during the
+workspace/runtime checks stops before inference.
+Atomically create a private `campaign-runtime.json` before the first inference and
+bind it to the campaign hash, stable Codex CLI version and coarse authentication
+surface. Reject every later case before inference if either runtime condition
+changes. If completed legacy evidence predates the lock, derive the initial binding
+from all completed receipts and reject an already mixed campaign. A corrupt,
+partial or non-private lock requires explicit reconciliation and is never replaced.
+Immediately after a completed inference, re-run the stable CLI and coarse
+authentication checks and re-read the campaign lock before writing success
+evidence. If any of those conditions changed during the call, retain the attempt
+claim for reconciliation and do not promote its output into the campaign.
+Preserve bounded stdout/stderr in a private per-attempt `unresolved/` directory
+with hashes, lifecycle metadata and an explicit non-promotion receipt. Apply the
+same handling when the measured checkout changes during the call. Do not release
+the claim, automatically retry the case/side or copy response content into public
+diagnostics until an operator has reconciled the attempt.
+Publish the pre-inference claim atomically as complete private JSON. Bind it to the
+campaign, case and side with a cryptographically random private attempt ID, and
+bind each unresolved receipt to the exact retained claim SHA-256. A missing,
+partial or mismatched claim is not reconcilable evidence and must not be promoted.
+Run `factory/agent/gpt6_evaluation.py audit-unresolved` before an operator reviews
+any retained attempt. It verifies the 0600 claim and files, 0700 directories,
+campaign binding, exact stored hashes and absence of promoted success evidence.
+The command is read-only: it does not reveal the private attempt ID or payload,
+remove the claim, retry the call or promote output. A failed or ambiguous audit
+requires manual investigation; a passing audit still requires an explicit,
+separately reviewed reconciliation policy before any state change.
+The audit result includes the canonical unresolved-receipt SHA-256. It reads
+private files with no-follow descriptors, then re-opens and compares the exact
+bytes and file identities after validation. Any concurrent replacement, mode
+change, attempt-directory change or success-evidence promotion fails closed so an
+operator cannot receive a result assembled from different evidence snapshots.
+The audit also fails closed when bounded stdout or stderr was not retained; hashes
+copied into a receipt cannot substitute for re-reading the underlying evidence or
+re-validating the completed JSONL lifecycle.
+The preliminary single-model access probe must likewise re-run the stable CLI and
+coarse authentication checks after completion. Treat a mid-probe version or
+authentication change as blocked rather than recording successful access. Preserve
+bounded stdout/stderr privately with the blocked receipt, including when a completed
+response misses the fixed sentinel, while exposing only hashes and lifecycle
+metadata. A completed process under changed conditions is not a validated probe.
+The mate receipt must bind the exact validated first-side receipt and raw
+event-stream hashes. Recompute both before grading and compilation; do not accept
+a pair if its predecessor changed after the mate was authorized.
+The mate observation timestamp must be equal to or later than the selected
+first-side timestamp. Calculate the maximum-gap check in that direction; an
+absolute time difference can conceal a pair executed in the wrong order.
+The order must match the deterministic schedule derived from the frozen source
+commit, case identifiers and prompt hashes; do not hand-pick which model goes first.
+Independent grades must name the exact receipt and raw event-stream hashes they
+reviewed. Compilation re-derives token counts and completion hashes from that raw
+JSONL and rejects evidence changed after grading. A successful receipt also requires
+exactly one ordered `thread.started`/`turn.started`/`turn.completed` lifecycle and a
+non-whitespace final agent message inside that turn. Missing, reordered or
+post-completion messages cannot enter the grading manifest or count toward the
+matched-pair minimum. The thread start must be the first stored event and turn
+completion the final stored event; prefix or suffix events make the stream
+ineligible, while item events remain allowed inside the lifecycle.
+Parse JSONL as strict finite JSON: duplicate object keys and `NaN`/infinite values
+are malformed evidence, including in fields not otherwise used by the compiler.
+Completed receipt and raw JSONL validation uses private no-follow descriptors,
+bounded reads and exact file snapshots. Re-open both files after lifecycle and
+schema checks and reject changed bytes, identity or mode, including a byte-identical
+replacement, so mate preflight, grading preparation and compilation cannot accept
+evidence assembled from different filesystem snapshots.
+Every case/side must also have a distinct event-stream hash. Reusing one raw JSONL
+as more than one execution is ineligible before blind grading and at compilation.
+Every case/side must also have a distinct Codex thread ID. Byte-distinct JSONL that
+reuses one thread remains one execution and is likewise ineligible at both gates.
+Generate a private blind manifest with random sample IDs before grading. It may
+contain case context, final response and evidence hashes, but not model, side,
+pair order, effort, timing, usage, authentication surface or evidence paths. Keep
+the separately generated identity map away from the evaluator. Grade schema v4
+uses only sample IDs and binds the grade set to the blind-manifest hash. It does not
+accept evaluator-supplied operational cost; compilation
+receives the private map and rejects substituted, duplicated or stale evidence.
 
 The offline gate requires no per-case quality regression or safety failure and
 at least 10% improvement in a measured operating metric. These are project

@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from codex_runtime import command as codex_command, require_gpt6_cli, selection
+
 
 def utc_now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -203,10 +205,12 @@ def run_repair(
         lines = validate_log.read_text(encoding="utf-8", errors="ignore").splitlines()
         validate_tail = "\n".join(lines[-200:])
 
+    if req.get("runtime_selection", {"profile": "legacy", "model": None, "effort": None}) != selection():
+        return False, "runtime-selection-mismatch", {}
+
     prompt = build_prompt(req, validate_tail)
     target_dir = str(Path(req["target_dir"]).resolve())
-    command = [
-        "codex",
+    command = codex_command("repair", [
         "exec",
         "--sandbox",
         sandbox_mode,
@@ -215,7 +219,7 @@ def run_repair(
         "-C",
         target_dir,
         prompt,
-    ]
+    ])
 
     try:
         res = app.request(
@@ -242,6 +246,13 @@ def run_repair(
 def main() -> int:
     args = parse_args()
     root = Path(args.root).resolve()
+    try:
+        selected = selection()
+        if selected["profile"] == "gpt6":
+            require_gpt6_cli()
+    except (ValueError, OSError, subprocess.SubprocessError):
+        print("fail_reason=codex-cli-incompatible-or-unavailable", file=sys.stderr)
+        return 78
     rq = root / "runtime" / "repair_queue"
     incoming = rq / "incoming"
     leased = rq / "leased"
