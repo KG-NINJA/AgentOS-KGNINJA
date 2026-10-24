@@ -1239,15 +1239,20 @@ raise SystemExit(23)
 
     def test_compile_requires_separate_complete_grades(self):
         evidence = self.root / "evidence"
-        for case in self.campaign["cases"]:
-            second_side = "candidate" if case["first_side"] == "baseline" else "baseline"
-            for side in (case["first_side"], second_side):
-                result = evaluation.collect(self.campaign_path, case["id"], side,
-                                            self.workspace, evidence, 10, str(self.fake))
-                receipt_path = Path(result["receipt_path"])
-                receipt = evaluation.kernel.load_json(receipt_path)
-                receipt["latency_ms"] = 1.0
-                receipt_path.write_bytes(evaluation.kernel.canonical(receipt) + b"\n")
+        with mock.patch.object(evaluation.time, "time",
+                               return_value=1_700_000_000.0):
+            for case in self.campaign["cases"]:
+                second_side = ("candidate" if case["first_side"] == "baseline"
+                               else "baseline")
+                for side in (case["first_side"], second_side):
+                    result = evaluation.collect(
+                        self.campaign_path, case["id"], side,
+                        self.workspace, evidence, 10, str(self.fake))
+                    receipt_path = Path(result["receipt_path"])
+                    receipt = evaluation.kernel.load_json(receipt_path)
+                    receipt["latency_ms"] = 1.0
+                    receipt_path.write_bytes(
+                        evaluation.kernel.canonical(receipt) + b"\n")
         manifest_path, mapping_path, grade_path, grades, manifest = prepare_grades(
             self.root, self.campaign_path, evidence)
         manifest_text = manifest_path.read_text()
@@ -1278,7 +1283,7 @@ raise SystemExit(23)
                          "event_input_plus_output_tokens")
         self.assertEqual(output["comparison_conditions"]["timeout_seconds"], 10)
         self.assertEqual(output["comparison_conditions"]["max_pair_gap_seconds"], 3600)
-        self.assertLessEqual(output["comparison_conditions"]["max_observed_pair_gap_seconds"], 2)
+        self.assertEqual(output["comparison_conditions"]["max_observed_pair_gap_seconds"], 0)
         self.assertEqual(output["comparison_conditions"]["baseline_first_pairs"], 15)
         self.assertEqual(output["comparison_conditions"]["candidate_first_pairs"], 15)
         self.assertEqual(os.stat(manifest_path).st_mode & 0o777, 0o600)
