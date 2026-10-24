@@ -95,6 +95,10 @@ version and coarse authentication surface. Every later case must match that priv
 campaign-hash-bound runtime lock before inference. For legacy evidence without the
 lock, recover the binding from every completed receipt and stop on any pre-existing
 mixture; never overwrite a corrupt or partial lock without explicit reconciliation.
+Open an existing lock through a private no-follow descriptor and retain its exact
+bytes, identity and 0600 mode while validating completed campaign evidence. Re-open
+it before authorizing inference and reject even a byte-identical replacement or
+permission change so one authorization cannot combine two runtime-lock snapshots.
 After every completed model call, re-check the CLI version, authentication surface
 and private campaign lock before promoting its output. A mid-call update, logout,
 authentication switch or lock mutation leaves the attempt unresolved for explicit

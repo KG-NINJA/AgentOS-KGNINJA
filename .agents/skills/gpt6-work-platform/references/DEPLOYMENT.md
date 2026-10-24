@@ -123,6 +123,10 @@ surface. Reject every later case before inference if either runtime condition
 changes. If completed legacy evidence predates the lock, derive the initial binding
 from all completed receipts and reject an already mixed campaign. A corrupt,
 partial or non-private lock requires explicit reconciliation and is never replaced.
+Read an existing lock as an exact 0600 regular-file snapshot through a no-follow
+descriptor. After validating completed campaign evidence, re-open the lock and
+reject changed bytes, identity or mode, including a byte-identical replacement;
+never authorize inference from a lock assembled across concurrent snapshots.
 Immediately after a completed inference, re-run the stable CLI and coarse
 authentication checks and re-read the campaign lock before writing success
 evidence. If any of those conditions changed during the call, retain the attempt

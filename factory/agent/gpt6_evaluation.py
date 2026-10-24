@@ -540,20 +540,29 @@ def _completed_campaign_runtime(campaign: dict[str, Any], evidence_dir: Path
     return version, auth_surface
 
 
-def _load_campaign_runtime_lock(campaign: dict[str, Any], lock_path: Path
-                                ) -> dict[str, Any]:
+def _campaign_runtime_lock_snapshot(
+        campaign: dict[str, Any], lock_path: Path
+        ) -> tuple[dict[str, Any], tuple[bytes, tuple[int, ...]]]:
+    """Validate one exact private runtime-lock snapshot."""
     expected = {"schema_version", "campaign_sha256", "codex_version", "auth_surface"}
-    if lock_path.is_symlink() or not lock_path.is_file():
-        raise kernel.Rejected("campaign runtime lock path is invalid")
-    if lock_path.stat().st_mode & 0o077:
-        raise kernel.Rejected("campaign runtime lock is not private")
-    locked = kernel.load_json(lock_path)
+    snapshot = _private_file_snapshot(
+        lock_path, 0o600, kernel.MAX_BYTES, "campaign runtime lock")
+    locked = kernel.parse_json(snapshot[0])
     if (type(locked) is not dict or set(locked) != expected
             or locked["schema_version"] != RUNTIME_LOCK_SCHEMA
             or locked["campaign_sha256"] != kernel.digest(campaign)
             or locked["auth_surface"] not in AUTH_SURFACES):
         raise kernel.Rejected("campaign runtime lock is invalid")
     _validated_codex_version(locked["codex_version"])
+    return locked, snapshot
+
+
+def _load_campaign_runtime_lock(campaign: dict[str, Any], lock_path: Path
+                                ) -> dict[str, Any]:
+    locked, snapshot = _campaign_runtime_lock_snapshot(campaign, lock_path)
+    _require_unchanged_private_snapshot(
+        lock_path, 0o600, kernel.MAX_BYTES, snapshot,
+        "campaign runtime lock")
     return locked
 
 
@@ -566,7 +575,8 @@ def _bind_campaign_runtime(campaign: dict[str, Any], evidence_dir: Path,
     _ensure_private_directory(evidence_dir)
     lock_path = evidence_dir / "campaign-runtime.json"
     if lock_path.exists() or lock_path.is_symlink():
-        locked = _load_campaign_runtime_lock(campaign, lock_path)
+        locked, lock_snapshot = _campaign_runtime_lock_snapshot(
+            campaign, lock_path)
         if locked["codex_version"] != version:
             raise kernel.Rejected("campaign Codex CLI version differs from runtime lock")
         if locked["auth_surface"] != auth_surface:
@@ -579,6 +589,9 @@ def _bind_campaign_runtime(campaign: dict[str, Any], evidence_dir: Path,
         if (completed_auth_surface is not None
                 and completed_auth_surface != locked["auth_surface"]):
             raise kernel.Rejected("completed evidence differs from campaign runtime lock")
+        _require_unchanged_private_snapshot(
+            lock_path, 0o600, kernel.MAX_BYTES, lock_snapshot,
+            "campaign runtime lock")
         return
 
     legacy_version, legacy_auth_surface = _completed_campaign_runtime(
