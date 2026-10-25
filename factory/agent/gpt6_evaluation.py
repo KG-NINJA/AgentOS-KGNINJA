@@ -557,17 +557,9 @@ def _campaign_runtime_lock_snapshot(
     return locked, snapshot
 
 
-def _load_campaign_runtime_lock(campaign: dict[str, Any], lock_path: Path
-                                ) -> dict[str, Any]:
-    locked, snapshot = _campaign_runtime_lock_snapshot(campaign, lock_path)
-    _require_unchanged_private_snapshot(
-        lock_path, 0o600, kernel.MAX_BYTES, snapshot,
-        "campaign runtime lock")
-    return locked
-
-
 def _bind_campaign_runtime(campaign: dict[str, Any], evidence_dir: Path,
-                           version: str, auth_surface: str) -> None:
+                           version: str, auth_surface: str
+                           ) -> tuple[bytes, tuple[int, ...]]:
     """Atomically bind all model calls in one campaign to one runtime surface."""
     version = _validated_codex_version(version)
     if auth_surface not in AUTH_SURFACES:
@@ -592,7 +584,7 @@ def _bind_campaign_runtime(campaign: dict[str, Any], evidence_dir: Path,
         _require_unchanged_private_snapshot(
             lock_path, 0o600, kernel.MAX_BYTES, lock_snapshot,
             "campaign runtime lock")
-        return
+        return lock_snapshot
 
     legacy_version, legacy_auth_surface = _completed_campaign_runtime(
         campaign, evidence_dir)
@@ -607,13 +599,17 @@ def _bind_campaign_runtime(campaign: dict[str, Any], evidence_dir: Path,
         "codex_version": legacy_version or version,
         "auth_surface": legacy_auth_surface or auth_surface,
     }
-    if _publish_private_exclusive(lock_path, runtime):
-        return
-    locked = _load_campaign_runtime_lock(campaign, lock_path)
+    _publish_private_exclusive(lock_path, runtime)
+    locked, lock_snapshot = _campaign_runtime_lock_snapshot(
+        campaign, lock_path)
     if locked["codex_version"] != version:
         raise kernel.Rejected("campaign Codex CLI version differs from runtime lock")
     if locked["auth_surface"] != auth_surface:
         raise kernel.Rejected("campaign authentication surface differs from runtime lock")
+    _require_unchanged_private_snapshot(
+        lock_path, 0o600, kernel.MAX_BYTES, lock_snapshot,
+        "campaign runtime lock")
+    return lock_snapshot
 
 
 def _revalidate_runtime_surface_after_execution(
@@ -1077,7 +1073,8 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
         raise kernel.Rejected("mate Codex CLI version differs from campaign-selected first side")
     if predecessor_auth_surface is not None and auth_surface != predecessor_auth_surface:
         raise kernel.Rejected("mate authentication surface differs from campaign-selected first side")
-    _bind_campaign_runtime(campaign, evidence_dir, version, auth_surface)
+    runtime_lock_snapshot = _bind_campaign_runtime(
+        campaign, evidence_dir, version, auth_surface)
     # The predecessor files are operator-owned and live outside the measured
     # checkout. Re-open and re-validate them after runtime preflight so a
     # concurrent replacement cannot authorize the mate with one snapshot and
@@ -1100,6 +1097,13 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
     # without necessarily exceeding the directed observation window.
     _require_mate_window(predecessor_observed_epoch, time.time(),
                          campaign["max_pair_gap_seconds"], timeout_seconds)
+    # Runtime binding is not the final preflight step. Re-open the exact lock at
+    # the last pre-claim boundary too, after predecessor and time-window checks,
+    # so a concurrent replacement cannot consume a model call under a different
+    # campaign runtime snapshot.
+    _require_unchanged_private_snapshot(
+        evidence_dir / "campaign-runtime.json", 0o600, kernel.MAX_BYTES,
+        runtime_lock_snapshot, "campaign runtime lock")
     stem = case_id + "." + side
     lock_path, claim = _claim_attempt(
         evidence_dir, stem, kernel.digest(campaign), case_id, side)

@@ -99,6 +99,9 @@ Open an existing lock through a private no-follow descriptor and retain its exac
 bytes, identity and 0600 mode while validating completed campaign evidence. Re-open
 it before authorizing inference and reject even a byte-identical replacement or
 permission change so one authorization cannot combine two runtime-lock snapshots.
+Re-open that same retained snapshot again at the last pre-claim boundary, after
+predecessor and time-window revalidation. A lock replacement during those later
+checks must stop before the attempt claim and model call.
 After every completed model call, re-check the CLI version, authentication surface
 and private campaign lock before promoting its output. A mid-call update, logout,
 authentication switch or lock mutation leaves the attempt unresolved for explicit

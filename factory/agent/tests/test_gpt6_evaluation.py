@@ -406,6 +406,41 @@ raise SystemExit(99)
         claim.assert_not_called()
         execute.assert_not_called()
 
+    def test_collect_rejects_runtime_lock_replacement_after_binding(self):
+        evidence = self.root / "runtime-lock-replaced-after-binding"
+        evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate",
+                           self.workspace, evidence, 10, str(self.fake))
+        runtime_path = evidence / "campaign-runtime.json"
+        other = next(case for case in self.campaign["cases"]
+                     if case["id"] != self.candidate_case_id)
+        require_first_side = evaluation._require_first_side_evidence
+        calls = 0
+
+        def replace_after_binding(*args):
+            nonlocal calls
+            result = require_first_side(*args)
+            calls += 1
+            if calls == 2:
+                replacement = evidence / "replacement-runtime.json"
+                replacement.write_bytes(runtime_path.read_bytes())
+                replacement.chmod(0o600)
+                os.replace(replacement, runtime_path)
+            return result
+
+        with mock.patch.object(
+                evaluation, "_require_first_side_evidence",
+                side_effect=replace_after_binding), \
+                mock.patch.object(evaluation, "_claim_attempt") as claim, \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "campaign runtime lock changed during validation"):
+                evaluation.collect(
+                    self.campaign_path, other["id"], other["first_side"],
+                    self.workspace, evidence, 10, str(self.fake))
+        claim.assert_not_called()
+        execute.assert_not_called()
+
     def test_runtime_lock_recovers_legacy_completed_campaign_conditions(self):
         evidence = self.root / "evidence"
         evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate",

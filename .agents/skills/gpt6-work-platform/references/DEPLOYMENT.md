@@ -127,6 +127,10 @@ Read an existing lock as an exact 0600 regular-file snapshot through a no-follow
 descriptor. After validating completed campaign evidence, re-open the lock and
 reject changed bytes, identity or mode, including a byte-identical replacement;
 never authorize inference from a lock assembled across concurrent snapshots.
+Retain that validated snapshot through the remaining predecessor and pair-window
+checks, then re-open it once more immediately before the attempt claim. Any lock
+replacement in that interval stops before inference rather than consuming a call
+under a runtime condition that no longer matches the validated binding.
 Immediately after a completed inference, re-run the stable CLI and coarse
 authentication checks and re-read the campaign lock before writing success
 evidence. If any of those conditions changed during the call, retain the attempt
