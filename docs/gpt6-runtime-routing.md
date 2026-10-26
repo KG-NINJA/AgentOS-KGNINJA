@@ -188,7 +188,10 @@ including `/dev/null`, as additional prompt input; the actual prompt remains the
 explicit CLI argument. Each case/side is claimed before
 inference: a concurrent or crash-left claim blocks reissue, and completed or
 partially written success evidence is never overwritten. Reconcile an uncertain
-claim before retrying. Failed attempts are retained in separate private directories
+claim before retrying. After publishing a claim, the runner re-opens the retained
+campaign runtime-lock snapshot at the final process-spawn boundary. A replacement
+starts no model process and releases only the exact unchanged claim for that
+unstarted attempt. Failed attempts are retained in separate private directories
 under `blocked/`, so an explicit retry cannot erase the earlier diagnosis.
 The checkout is verified again after the model process completes. If its commit or
 contents changed during execution, no success receipt is written and the claim

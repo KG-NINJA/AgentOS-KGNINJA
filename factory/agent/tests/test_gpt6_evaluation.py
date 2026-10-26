@@ -441,6 +441,36 @@ raise SystemExit(99)
         claim.assert_not_called()
         execute.assert_not_called()
 
+    def test_collect_rejects_runtime_lock_replacement_during_claim(self):
+        evidence = self.root / "runtime-lock-replaced-during-claim"
+        evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate",
+                           self.workspace, evidence, 10, str(self.fake))
+        runtime_path = evidence / "campaign-runtime.json"
+        other = next(case for case in self.campaign["cases"]
+                     if case["id"] != self.candidate_case_id)
+        claim_attempt = evaluation._claim_attempt
+
+        def replace_during_claim(*args):
+            result = claim_attempt(*args)
+            replacement = evidence / "replacement-runtime.json"
+            replacement.write_bytes(runtime_path.read_bytes())
+            replacement.chmod(0o600)
+            os.replace(replacement, runtime_path)
+            return result
+
+        with mock.patch.object(
+                evaluation, "_claim_attempt", side_effect=replace_during_claim), \
+                mock.patch.object(evaluation, "execute") as execute:
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "campaign runtime lock changed during validation"):
+                evaluation.collect(
+                    self.campaign_path, other["id"], other["first_side"],
+                    self.workspace, evidence, 10, str(self.fake))
+        execute.assert_not_called()
+        stem = other["id"] + "." + other["first_side"]
+        self.assertFalse((evidence / ("." + stem + ".lock")).exists())
+
     def test_runtime_lock_recovers_legacy_completed_campaign_conditions(self):
         evidence = self.root / "evidence"
         evaluation.collect(self.campaign_path, self.candidate_case_id, "candidate",
@@ -1137,7 +1167,7 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
         evidence = self.root / "evidence"
         campaign_sha256 = evaluation.kernel.digest(self.campaign)
         stem = self.candidate_case_id + ".candidate"
-        first_path, first = evaluation._claim_attempt(
+        first_path, first, _ = evaluation._claim_attempt(
             evidence, stem, campaign_sha256, self.candidate_case_id, "candidate")
         self.assertEqual(evaluation.kernel.load_json(first_path), first)
         self.assertEqual(set(first), {"schema_version", "campaign_sha256",
@@ -1148,7 +1178,7 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100}}))
             evaluation._claim_attempt(
                 evidence, stem, campaign_sha256, self.candidate_case_id, "candidate")
         first_path.unlink()
-        second_path, second = evaluation._claim_attempt(
+        second_path, second, _ = evaluation._claim_attempt(
             evidence, stem, campaign_sha256, self.candidate_case_id, "candidate")
         self.assertNotEqual(first["attempt_id"], second["attempt_id"])
         self.assertEqual(evaluation.kernel.load_json(second_path), second)

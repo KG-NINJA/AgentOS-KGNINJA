@@ -102,6 +102,11 @@ permission change so one authorization cannot combine two runtime-lock snapshots
 Re-open that same retained snapshot again at the last pre-claim boundary, after
 predecessor and time-window revalidation. A lock replacement during those later
 checks must stop before the attempt claim and model call.
+Because publishing the claim is itself a filesystem operation, re-open the same
+runtime-lock snapshot again after claim publication at the final process-spawn
+boundary. If it changed, start no model process and release only the exact,
+unchanged claim created for that unstarted attempt; a changed claim stays failed
+closed for reconciliation.
 After every completed model call, re-check the CLI version, authentication surface
 and private campaign lock before promoting its output. A mid-call update, logout,
 authentication switch or lock mutation leaves the attempt unresolved for explicit

@@ -131,6 +131,10 @@ Retain that validated snapshot through the remaining predecessor and pair-window
 checks, then re-open it once more immediately before the attempt claim. Any lock
 replacement in that interval stops before inference rather than consuming a call
 under a runtime condition that no longer matches the validated binding.
+After the claim is published, re-open the same runtime-lock snapshot again at the
+final process-spawn boundary. A replacement during claim publication must start no
+model process. Remove only the exact unchanged claim for that unstarted attempt;
+if the claim also changed, retain it and fail closed for explicit reconciliation.
 Immediately after a completed inference, re-run the stable CLI and coarse
 authentication checks and re-read the campaign lock before writing success
 evidence. If any of those conditions changed during the call, retain the attempt

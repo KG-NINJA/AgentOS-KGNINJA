@@ -120,7 +120,8 @@ def _publish_private_exclusive(path: Path, value: dict[str, Any]) -> bool:
 
 
 def _claim_attempt(evidence_dir: Path, stem: str, campaign_sha256: str,
-                   case_id: str, side: str) -> tuple[Path, dict[str, Any]]:
+                   case_id: str, side: str
+                   ) -> tuple[Path, dict[str, Any], tuple[bytes, tuple[int, ...]]]:
     """Claim one case/side before inference and refuse uncertain re-entry."""
     _ensure_private_directory(evidence_dir)
     completed = (evidence_dir / (stem + ".jsonl"),
@@ -137,11 +138,23 @@ def _claim_attempt(evidence_dir: Path, stem: str, campaign_sha256: str,
     }
     if not _publish_private_exclusive(lock_path, claim):
         raise kernel.Rejected("attempt already in progress or requires reconciliation")
+    claim_snapshot = _private_file_snapshot(
+        lock_path, 0o600, kernel.MAX_BYTES, "attempt claim")
+    if kernel.parse_json(claim_snapshot[0]) != claim:
+        raise kernel.Rejected("attempt claim changed during validation")
     # Close the race between the initial evidence check and the exclusive claim.
     if any(path.exists() or path.is_symlink() for path in completed):
-        lock_path.unlink()
+        _release_unstarted_claim(lock_path, claim_snapshot)
         raise kernel.Rejected("completed or partial evidence already exists")
-    return lock_path, claim
+    return lock_path, claim, claim_snapshot
+
+
+def _release_unstarted_claim(
+        lock_path: Path, claim_snapshot: tuple[bytes, tuple[int, ...]]) -> None:
+    """Remove only the exact claim retained before a model process was started."""
+    _require_unchanged_private_snapshot(
+        lock_path, 0o600, kernel.MAX_BYTES, claim_snapshot, "attempt claim")
+    lock_path.unlink()
 
 
 def _blocked_attempt_dir(evidence_dir: Path, stem: str) -> Path:
@@ -1105,8 +1118,19 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
         evidence_dir / "campaign-runtime.json", 0o600, kernel.MAX_BYTES,
         runtime_lock_snapshot, "campaign runtime lock")
     stem = case_id + "." + side
-    lock_path, claim = _claim_attempt(
+    lock_path, claim, claim_snapshot = _claim_attempt(
         evidence_dir, stem, kernel.digest(campaign), case_id, side)
+    # Claim publication is itself a filesystem operation after the last pre-claim
+    # runtime check. Re-open the originally bound lock once more at the final
+    # process-spawn boundary. If it changed, no model process has started, so
+    # release only our still-unchanged claim and fail closed.
+    try:
+        _require_unchanged_private_snapshot(
+            evidence_dir / "campaign-runtime.json", 0o600, kernel.MAX_BYTES,
+            runtime_lock_snapshot, "campaign runtime lock")
+    except kernel.Rejected:
+        _release_unstarted_claim(lock_path, claim_snapshot)
+        raise
     resolved = False
     try:
         try:
