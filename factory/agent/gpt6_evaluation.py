@@ -1206,6 +1206,20 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
                 auth_surface, timeout_seconds, summary, raw, stderr,
                 "post-execution-workspace-revalidation-failed", claim,
                 completed_observed_epoch) from exc
+        # The claim is the exclusive ownership record for this exact model call.
+        # Re-open the original private snapshot after every other post-call check
+        # and before publishing comparable success evidence. A replaced claim can
+        # no longer prove that this collector still owns the completed attempt.
+        try:
+            _require_unchanged_private_snapshot(
+                lock_path, 0o600, kernel.MAX_BYTES, claim_snapshot,
+                "attempt claim")
+        except kernel.Rejected as exc:
+            raise _preserve_unresolved_attempt(
+                campaign, case, side, evidence_dir, stem, model, version,
+                auth_surface, timeout_seconds, summary, raw, stderr,
+                "post-execution-claim-revalidation-failed", claim,
+                completed_observed_epoch) from exc
         raw_path = evidence_dir / (stem + ".jsonl")
         receipt_path = evidence_dir / (stem + ".receipt.json")
         _write_private_bytes(raw_path, raw)

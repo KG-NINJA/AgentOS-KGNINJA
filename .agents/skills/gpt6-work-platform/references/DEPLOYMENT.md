@@ -139,6 +139,10 @@ Immediately after a completed inference, re-run the stable CLI and coarse
 authentication checks and re-read the campaign lock before writing success
 evidence. If any of those conditions changed during the call, retain the attempt
 claim for reconciliation and do not promote its output into the campaign.
+After those runtime and workspace checks, re-open the exact original attempt-claim
+snapshot before success promotion. A changed identity, bytes or mode, including a
+byte-identical claim replacement, leaves the completed output unresolved with its
+claim rather than allowing it to become comparable campaign evidence.
 Preserve bounded stdout/stderr in a private per-attempt `unresolved/` directory
 with hashes, lifecycle metadata and an explicit non-promotion receipt. Apply the
 same handling when the measured checkout changes during the call. Do not release

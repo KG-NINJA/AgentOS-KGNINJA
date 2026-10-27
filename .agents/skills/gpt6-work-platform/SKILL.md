@@ -108,8 +108,10 @@ boundary. If it changed, start no model process and release only the exact,
 unchanged claim created for that unstarted attempt; a changed claim stays failed
 closed for reconciliation.
 After every completed model call, re-check the CLI version, authentication surface
-and private campaign lock before promoting its output. A mid-call update, logout,
-authentication switch or lock mutation leaves the attempt unresolved for explicit
+and private campaign lock before promoting its output. Re-open the exact original
+attempt-claim snapshot after all other post-call checks and before success
+promotion. A mid-call update, logout, authentication switch, runtime-lock mutation
+or byte-identical claim replacement leaves the attempt unresolved for explicit
 reconciliation; it is not comparable success evidence.
 Retain bounded stdout/stderr and a private unresolved receipt for that completed
 process, including a post-call workspace change. Keep the case/side claim in place,

@@ -561,6 +561,29 @@ raise SystemExit(99)
             raised, evidence, self.candidate_case_id, "candidate",
             "post-execution-runtime-revalidation-failed")
 
+    def test_collect_rejects_claim_replacement_after_model_call(self):
+        evidence = self.root / "claim-replaced-after-model-call"
+        original_execute = evaluation.execute
+        stem = self.candidate_case_id + ".candidate"
+
+        def replace_claim(*args, **kwargs):
+            result = original_execute(*args, **kwargs)
+            claim_path = evidence / ("." + stem + ".lock")
+            replacement = evidence / "replacement-claim.json"
+            replacement.write_bytes(claim_path.read_bytes())
+            replacement.chmod(0o600)
+            os.replace(replacement, claim_path)
+            return result
+
+        with mock.patch.object(evaluation, "execute", side_effect=replace_claim):
+            with self.assertRaises(evaluation.CodexRunUnresolved) as raised:
+                evaluation.collect(
+                    self.campaign_path, self.candidate_case_id, "candidate",
+                    self.workspace, evidence, 10, str(self.fake))
+        self.assertUnresolvedAttempt(
+            raised, evidence, self.candidate_case_id, "candidate",
+            "post-execution-claim-revalidation-failed")
+
     def test_collect_rejects_timeout_mismatch_before_model_call(self):
         with mock.patch.object(evaluation, "_codex_version") as version, \
                 mock.patch.object(evaluation, "execute") as execute:

@@ -196,6 +196,9 @@ under `blocked/`, so an explicit retry cannot erase the earlier diagnosis.
 The checkout is verified again after the model process completes. If its commit or
 contents changed during execution, no success receipt is written and the claim
 remains unresolved for explicit operator reconciliation.
+The original 0600 attempt-claim snapshot is also re-opened after all post-execution
+runtime and workspace checks. A changed claim, including a byte-identical inode
+replacement, prevents success promotion and retains the output as unresolved.
 Receipt schema v14 requires the mate observation timestamp to be no earlier than
 the campaign-selected first-side timestamp. Compilation uses that directed interval,
 not an absolute difference, so reversed observations cannot satisfy the maximum-gap
