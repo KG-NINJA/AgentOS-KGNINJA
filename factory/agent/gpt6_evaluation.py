@@ -144,14 +144,14 @@ def _claim_attempt(evidence_dir: Path, stem: str, campaign_sha256: str,
         raise kernel.Rejected("attempt claim changed during validation")
     # Close the race between the initial evidence check and the exclusive claim.
     if any(path.exists() or path.is_symlink() for path in completed):
-        _release_unstarted_claim(lock_path, claim_snapshot)
+        _release_exact_claim(lock_path, claim_snapshot)
         raise kernel.Rejected("completed or partial evidence already exists")
     return lock_path, claim, claim_snapshot
 
 
-def _release_unstarted_claim(
+def _release_exact_claim(
         lock_path: Path, claim_snapshot: tuple[bytes, tuple[int, ...]]) -> None:
-    """Remove only the exact claim retained before a model process was started."""
+    """Remove only the exact private claim snapshot owned by this collector."""
     _require_unchanged_private_snapshot(
         lock_path, 0o600, kernel.MAX_BYTES, claim_snapshot, "attempt claim")
     lock_path.unlink()
@@ -459,6 +459,9 @@ def _validated_completed_evidence(campaign: dict[str, Any], case: dict[str, Any]
                                   ) -> tuple[dict[str, Any], str]:
     """Load one completed run and re-derive its evidence-bound fields."""
     _private_directory_snapshot(evidence_dir, 0o700, "completed evidence")
+    claim_path = evidence_dir / f".{case['id']}.{side}.lock"
+    if claim_path.exists() or claim_path.is_symlink():
+        raise kernel.Rejected("completed evidence retains an attempt claim")
     receipt_path = evidence_dir / f"{case['id']}.{side}.receipt.json"
     raw_path = evidence_dir / f"{case['id']}.{side}.jsonl"
     receipt_snapshot = _private_file_snapshot(
@@ -1129,7 +1132,7 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
             evidence_dir / "campaign-runtime.json", 0o600, kernel.MAX_BYTES,
             runtime_lock_snapshot, "campaign runtime lock")
     except kernel.Rejected:
-        _release_unstarted_claim(lock_path, claim_snapshot)
+        _release_exact_claim(lock_path, claim_snapshot)
         raise
     resolved = False
     try:
@@ -1244,7 +1247,9 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
         return {**receipt, "receipt_path": str(receipt_path), "raw_path": str(raw_path)}
     finally:
         if resolved:
-            lock_path.unlink()
+            # A receipt is not resolved until this collector releases the exact
+            # claim it created. Never delete a replacement claim.
+            _release_exact_claim(lock_path, claim_snapshot)
 
 
 def probe(effort: str, workspace: Path, timeout_seconds: int,

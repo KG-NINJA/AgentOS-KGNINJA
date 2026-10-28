@@ -113,6 +113,10 @@ attempt-claim snapshot after all other post-call checks and before success
 promotion. A mid-call update, logout, authentication switch, runtime-lock mutation
 or byte-identical claim replacement leaves the attempt unresolved for explicit
 reconciliation; it is not comparable success evidence.
+After writing a successful stream and receipt, release only that same exact claim
+snapshot. If the claim changed during success publication, retain it and reject the
+apparently completed artifacts at every mate, grading and compilation boundary;
+never delete a replacement claim or treat those artifacts as resolved evidence.
 Retain bounded stdout/stderr and a private unresolved receipt for that completed
 process, including a post-call workspace change. Keep the case/side claim in place,
 expose only hashes and lifecycle metadata outside the private store, and never

@@ -584,6 +584,40 @@ raise SystemExit(99)
             raised, evidence, self.candidate_case_id, "candidate",
             "post-execution-claim-revalidation-failed")
 
+    def test_collect_does_not_release_replaced_claim_after_success_write(self):
+        evidence = self.root / "claim-replaced-during-success-write"
+        stem = self.candidate_case_id + ".candidate"
+        claim_path = evidence / ("." + stem + ".lock")
+        receipt_path = evidence / (stem + ".receipt.json")
+        original_write_private = evaluation._write_private
+
+        def replace_claim_after_receipt(path, value):
+            original_write_private(path, value)
+            if path == receipt_path:
+                replacement = evidence / "replacement-claim.json"
+                replacement.write_bytes(claim_path.read_bytes())
+                replacement.chmod(0o600)
+                os.replace(replacement, claim_path)
+
+        with mock.patch.object(
+                evaluation, "_write_private",
+                side_effect=replace_claim_after_receipt):
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected, "attempt claim changed"):
+                evaluation.collect(
+                    self.campaign_path, self.candidate_case_id, "candidate",
+                    self.workspace, evidence, 10, str(self.fake))
+
+        self.assertTrue(claim_path.exists())
+        self.assertTrue((evidence / (stem + ".jsonl")).exists())
+        self.assertTrue(receipt_path.exists())
+        case = evaluation._case(self.campaign, self.candidate_case_id)
+        with self.assertRaisesRegex(
+                evaluation.kernel.Rejected,
+                "completed evidence retains an attempt claim"):
+            evaluation._validated_completed_evidence(
+                self.campaign, case, "candidate", evidence)
+
     def test_collect_rejects_timeout_mismatch_before_model_call(self):
         with mock.patch.object(evaluation, "_codex_version") as version, \
                 mock.patch.object(evaluation, "execute") as execute:

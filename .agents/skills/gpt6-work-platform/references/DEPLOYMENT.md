@@ -143,6 +143,10 @@ After those runtime and workspace checks, re-open the exact original attempt-cla
 snapshot before success promotion. A changed identity, bytes or mode, including a
 byte-identical claim replacement, leaves the completed output unresolved with its
 claim rather than allowing it to become comparable campaign evidence.
+Release a resolved attempt only by re-opening that exact claim snapshot after the
+success stream and receipt have been written. If it changed during publication,
+leave the claim in place and reject the completed-looking files at mate preflight,
+blind grading and compilation; do not unlink the replacement or count the run.
 Preserve bounded stdout/stderr in a private per-attempt `unresolved/` directory
 with hashes, lifecycle metadata and an explicit non-promotion receipt. Apply the
 same handling when the measured checkout changes during the call. Do not release
