@@ -37,6 +37,7 @@ BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v2"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CLAIM_SCHEMA = "gpt6-evaluation-claim.v1"
+FINALIZATION_SCHEMA = "gpt6-evaluation-finalization.v1"
 UNRESOLVED_SCHEMA = "gpt6-execution-unresolved.v2"
 UNRESOLVED_AUDIT_SCHEMA = "gpt6-unresolved-audit.v2"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
@@ -125,7 +126,8 @@ def _claim_attempt(evidence_dir: Path, stem: str, campaign_sha256: str,
     """Claim one case/side before inference and refuse uncertain re-entry."""
     _ensure_private_directory(evidence_dir)
     completed = (evidence_dir / (stem + ".jsonl"),
-                 evidence_dir / (stem + ".receipt.json"))
+                 evidence_dir / (stem + ".receipt.json"),
+                 evidence_dir / (stem + ".finalized.json"))
     if any(path.exists() or path.is_symlink() for path in completed):
         raise kernel.Rejected("completed or partial evidence already exists")
     lock_path = evidence_dir / ("." + stem + ".lock")
@@ -464,6 +466,7 @@ def _validated_completed_evidence(campaign: dict[str, Any], case: dict[str, Any]
         raise kernel.Rejected("completed evidence retains an attempt claim")
     receipt_path = evidence_dir / f"{case['id']}.{side}.receipt.json"
     raw_path = evidence_dir / f"{case['id']}.{side}.jsonl"
+    finalization_path = evidence_dir / f"{case['id']}.{side}.finalized.json"
     receipt_snapshot = _private_file_snapshot(
         receipt_path, 0o600, kernel.MAX_BYTES, "completed evidence")
     raw_snapshot = _private_file_snapshot(
@@ -518,12 +521,33 @@ def _validated_completed_evidence(campaign: dict[str, Any], case: dict[str, Any]
     for field, value in completion.items():
         if receipt[field] != value:
             raise kernel.Rejected("receipt completion metrics do not match raw evidence")
+    finalization_snapshot = _private_file_snapshot(
+        finalization_path, 0o600, kernel.MAX_BYTES,
+        "completed evidence finalization marker")
+    finalization = kernel.parse_json(finalization_snapshot[0])
+    finalization_expected = {
+        "schema_version", "campaign_sha256", "case_id", "side",
+        "claim_sha256", "event_stream_sha256",
+    }
+    if (type(finalization) is not dict
+            or set(finalization) != finalization_expected
+            or finalization["schema_version"] != FINALIZATION_SCHEMA
+            or finalization["campaign_sha256"] != kernel.digest(campaign)
+            or finalization["case_id"] != case["id"]
+            or finalization["side"] != side
+            or type(finalization["claim_sha256"]) is not str
+            or not re.fullmatch(r"[0-9a-f]{64}", finalization["claim_sha256"])
+            or finalization["event_stream_sha256"] != _sha_bytes(raw)):
+        raise kernel.Rejected("completed evidence finalization marker does not match evidence")
     _require_unchanged_private_snapshot(
         receipt_path, 0o600, kernel.MAX_BYTES, receipt_snapshot,
         "completed evidence")
     _require_unchanged_private_snapshot(
         raw_path, 0o600, MAX_EVENT_STREAM_BYTES, raw_snapshot,
         "completed evidence")
+    _require_unchanged_private_snapshot(
+        finalization_path, 0o600, kernel.MAX_BYTES, finalization_snapshot,
+        "completed evidence finalization marker")
     return receipt, final_message
 
 
@@ -537,9 +561,12 @@ def _completed_campaign_runtime(campaign: dict[str, Any], evidence_dir: Path
             stem = f"{case['id']}.{side}"
             raw_path = evidence_dir / (stem + ".jsonl")
             receipt_path = evidence_dir / (stem + ".receipt.json")
+            finalization_path = evidence_dir / (stem + ".finalized.json")
             raw_present = raw_path.exists() or raw_path.is_symlink()
             receipt_present = receipt_path.exists() or receipt_path.is_symlink()
-            if raw_present != receipt_present:
+            finalization_present = (finalization_path.exists()
+                                    or finalization_path.is_symlink())
+            if len({raw_present, receipt_present, finalization_present}) != 1:
                 raise kernel.Rejected("partial completed evidence requires reconciliation")
             if not raw_present:
                 continue
@@ -1135,6 +1162,7 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
         _release_exact_claim(lock_path, claim_snapshot)
         raise
     resolved = False
+    claim_released = False
     try:
         try:
             summary, raw, stderr = execute(
@@ -1243,10 +1271,26 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
                    "predecessor_event_stream_sha256": predecessor_event_stream_sha256,
                    "provider_model_identity_verified": False, **summary}
         _write_private(receipt_path, receipt)
-        resolved = True
+        # Completion is durable only after the exact claim for this attempt is
+        # gone.  Publish a hash-bound marker after that release so a collector
+        # failure in this narrow window cannot leave success-looking evidence
+        # that downstream grading accepts.
+        _release_exact_claim(lock_path, claim_snapshot)
+        claim_released = True
+        finalization_path = evidence_dir / (stem + ".finalized.json")
+        finalization = {
+            "schema_version": FINALIZATION_SCHEMA,
+            "campaign_sha256": kernel.digest(campaign),
+            "case_id": case_id,
+            "side": side,
+            "claim_sha256": kernel.digest(claim),
+            "event_stream_sha256": _sha_bytes(raw),
+        }
+        if not _publish_private_exclusive(finalization_path, finalization):
+            raise kernel.Rejected("completed evidence finalization marker already exists")
         return {**receipt, "receipt_path": str(receipt_path), "raw_path": str(raw_path)}
     finally:
-        if resolved:
+        if resolved and not claim_released:
             # A receipt is not resolved until this collector releases the exact
             # claim it created. Never delete a replacement claim.
             _release_exact_claim(lock_path, claim_snapshot)

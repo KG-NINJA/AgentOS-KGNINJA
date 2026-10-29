@@ -117,6 +117,11 @@ After writing a successful stream and receipt, release only that same exact clai
 snapshot. If the claim changed during success publication, retain it and reject the
 apparently completed artifacts at every mate, grading and compilation boundary;
 never delete a replacement claim or treat those artifacts as resolved evidence.
+Only after that exact release, atomically publish a private finalization marker
+bound to the campaign, case, side, original claim hash and raw event-stream hash.
+Mate preflight, blind grading and compilation must require the marker as well as
+the absence of a claim. A missing, replaced or mismatched marker means collection
+did not durably finish, even if a success stream and receipt are present.
 Retain bounded stdout/stderr and a private unresolved receipt for that completed
 process, including a post-call workspace change. Keep the case/side claim in place,
 expose only hashes and lifecycle metadata outside the private store, and never
@@ -165,11 +170,12 @@ that lifecycle while allowing documented item events inside it.
 Parse every JSONL event through the same strict finite-JSON boundary used for
 receipts. Duplicate object keys or non-finite numbers make the event ambiguous and
 must block collection rather than inherit parser-specific meaning.
-Open completed receipts and raw JSONL through private no-follow descriptors and
-retain their exact bytes, identity and mode while validating them. Re-open both
-files before returning the validated result and reject even a byte-identical inode
-replacement or permission change; mate authorization, blind grading and compilation
-must not consume a mixed snapshot assembled during concurrent replacement.
+Open completed receipts, raw JSONL and finalization markers through private
+no-follow descriptors and retain their exact bytes, identity and mode while
+validating them. Re-open all three files before returning the validated result.
+Reject even a byte-identical inode replacement or permission change; mate
+authorization, blind grading and compilation must not consume a mixed snapshot
+assembled during concurrent replacement.
 Require a unique event-stream hash for every case/side execution in the campaign.
 The same stored JSONL cannot count as multiple distinct completed runs even when
 case-specific receipt fields are rewritten around it.

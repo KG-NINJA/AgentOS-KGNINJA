@@ -96,6 +96,13 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
     def tearDown(self):
         self.temp.cleanup()
 
+    def refresh_finalization(self, evidence: Path, stem: str):
+        marker_path = evidence / (stem + ".finalized.json")
+        marker = evaluation.kernel.load_json(marker_path)
+        marker["event_stream_sha256"] = evaluation._sha_bytes(
+            (evidence / (stem + ".jsonl")).read_bytes())
+        evaluation._write_private(marker_path, marker)
+
     def assertUnresolvedAttempt(self, raised, evidence: Path, case_id: str,
                                 side: str, reason: str):
         exc = raised.exception
@@ -337,6 +344,13 @@ raise SystemExit(99)
         self.assertEqual(os.stat(evidence).st_mode & 0o777, 0o700)
         receipt_path = evidence / f"{self.candidate_case_id}.candidate.receipt.json"
         self.assertEqual(os.stat(receipt_path).st_mode & 0o777, 0o600)
+        finalization_path = evidence / f"{self.candidate_case_id}.candidate.finalized.json"
+        self.assertEqual(os.stat(finalization_path).st_mode & 0o777, 0o600)
+        finalization = evaluation.kernel.load_json(finalization_path)
+        self.assertEqual(finalization["schema_version"], evaluation.FINALIZATION_SCHEMA)
+        self.assertEqual(finalization["event_stream_sha256"],
+                         evaluation._sha_bytes(
+                             (evidence / f"{self.candidate_case_id}.candidate.jsonl").read_bytes()))
         runtime_path = evidence / "campaign-runtime.json"
         self.assertEqual(os.stat(runtime_path).st_mode & 0o777, 0o600)
         self.assertEqual(evaluation.kernel.load_json(runtime_path), {
@@ -611,10 +625,43 @@ raise SystemExit(99)
         self.assertTrue(claim_path.exists())
         self.assertTrue((evidence / (stem + ".jsonl")).exists())
         self.assertTrue(receipt_path.exists())
+        self.assertFalse((evidence / (stem + ".finalized.json")).exists())
         case = evaluation._case(self.campaign, self.candidate_case_id)
         with self.assertRaisesRegex(
                 evaluation.kernel.Rejected,
                 "completed evidence retains an attempt claim"):
+            evaluation._validated_completed_evidence(
+                self.campaign, case, "candidate", evidence)
+
+    def test_collect_does_not_finalize_when_claim_disappears_after_success_write(self):
+        evidence = self.root / "claim-missing-during-success-write"
+        stem = self.candidate_case_id + ".candidate"
+        claim_path = evidence / ("." + stem + ".lock")
+        receipt_path = evidence / (stem + ".receipt.json")
+        original_write_private = evaluation._write_private
+
+        def delete_claim_after_receipt(path, value):
+            original_write_private(path, value)
+            if path == receipt_path:
+                claim_path.unlink()
+
+        with mock.patch.object(
+                evaluation, "_write_private",
+                side_effect=delete_claim_after_receipt):
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected, "attempt claim changed"):
+                evaluation.collect(
+                    self.campaign_path, self.candidate_case_id, "candidate",
+                    self.workspace, evidence, 10, str(self.fake))
+
+        self.assertFalse(claim_path.exists())
+        self.assertTrue((evidence / (stem + ".jsonl")).exists())
+        self.assertTrue(receipt_path.exists())
+        self.assertFalse((evidence / (stem + ".finalized.json")).exists())
+        case = evaluation._case(self.campaign, self.candidate_case_id)
+        with self.assertRaisesRegex(
+                evaluation.kernel.Rejected,
+                "completed evidence finalization marker path is invalid"):
             evaluation._validated_completed_evidence(
                 self.campaign, case, "candidate", evidence)
 
@@ -914,6 +961,32 @@ raise SystemExit(99)
             with self.assertRaisesRegex(
                     evaluation.kernel.Rejected,
                     "completed evidence changed during validation"):
+                evaluation._validated_completed_evidence(
+                    self.campaign, case, "baseline", evidence)
+
+    def test_finalization_marker_replacement_during_validation_is_rejected(self):
+        evidence = self.root / "finalization-snapshot"
+        case_id = self.baseline_case_id
+        evaluation.collect(self.campaign_path, case_id, "baseline", self.workspace,
+                           evidence, 10, str(self.fake))
+        case = evaluation._case(self.campaign, case_id)
+        receipt_path = evidence / f"{case_id}.baseline.receipt.json"
+        finalization_path = evidence / f"{case_id}.baseline.finalized.json"
+        original_finalization = finalization_path.read_bytes()
+        real_require = evaluation._require_unchanged_private_snapshot
+
+        def replace_marker_before_final_check(path, *args, **kwargs):
+            if path == receipt_path:
+                evaluation._write_private_bytes(
+                    finalization_path, original_finalization)
+            return real_require(path, *args, **kwargs)
+
+        with mock.patch.object(
+                evaluation, "_require_unchanged_private_snapshot",
+                side_effect=replace_marker_before_final_check):
+            with self.assertRaisesRegex(
+                    evaluation.kernel.Rejected,
+                    "completed evidence finalization marker changed during validation"):
                 evaluation._validated_completed_evidence(
                     self.campaign, case, "baseline", evidence)
 
@@ -1540,6 +1613,7 @@ raise SystemExit(23)
             completion, _ = evaluation._completion_evidence(source_raw)
             receipt.update(completion)
             target_receipt_path.write_bytes(evaluation.kernel.canonical(receipt) + b"\n")
+            self.refresh_finalization(evidence, target)
 
         def duplicate_thread_with_distinct_stream() -> None:
             rewritten_raw = b"\n" + source_raw
@@ -1548,6 +1622,7 @@ raise SystemExit(23)
             completion, _ = evaluation._completion_evidence(rewritten_raw)
             receipt.update(completion)
             target_receipt_path.write_bytes(evaluation.kernel.canonical(receipt) + b"\n")
+            self.refresh_finalization(evidence, target)
 
         duplicate_event_stream()
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
@@ -1557,6 +1632,7 @@ raise SystemExit(23)
                 self.root / "duplicate-map.json")
         target_raw_path.write_bytes(original_raw)
         target_receipt_path.write_bytes(original_receipt)
+        self.refresh_finalization(evidence, target)
         duplicate_thread_with_distinct_stream()
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "duplicate thread id"):
@@ -1565,6 +1641,7 @@ raise SystemExit(23)
                 self.root / "duplicate-thread-map.json")
         target_raw_path.write_bytes(original_raw)
         target_receipt_path.write_bytes(original_receipt)
+        self.refresh_finalization(evidence, target)
         manifest_path, mapping_path, grade_path, _, _ = prepare_grades(
             self.root, self.campaign_path, evidence, "-corrupt")
         duplicate_event_stream()
@@ -1574,6 +1651,7 @@ raise SystemExit(23)
                                       manifest_path, mapping_path)
         target_raw_path.write_bytes(original_raw)
         target_receipt_path.write_bytes(original_receipt)
+        self.refresh_finalization(evidence, target)
         duplicate_thread_with_distinct_stream()
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "duplicate thread id"):
@@ -1581,6 +1659,7 @@ raise SystemExit(23)
                                       manifest_path, mapping_path)
         target_raw_path.write_bytes(original_raw)
         target_receipt_path.write_bytes(original_receipt)
+        self.refresh_finalization(evidence, target)
         (evidence / f"{self.candidate_case_id}.candidate.jsonl").write_text('{"type":"error"}\n')
         with self.assertRaises(evaluation.kernel.Rejected):
             evaluation.compile_report(self.campaign_path, evidence, grade_path,

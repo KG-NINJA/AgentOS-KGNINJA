@@ -147,6 +147,12 @@ Release a resolved attempt only by re-opening that exact claim snapshot after th
 success stream and receipt have been written. If it changed during publication,
 leave the claim in place and reject the completed-looking files at mate preflight,
 blind grading and compilation; do not unlink the replacement or count the run.
+After the exact claim is released, atomically write a 0600 finalization marker
+bound to the campaign, case, side, original claim hash and raw event-stream hash.
+Every completed-evidence reader must require that marker, re-open its exact private
+snapshot after validation and reject a missing or mismatched marker. Thus a crash,
+claim deletion or publication failure between receipt creation and finalization
+cannot turn incomplete collector state into comparable evidence.
 Preserve bounded stdout/stderr in a private per-attempt `unresolved/` directory
 with hashes, lifecycle metadata and an explicit non-promotion receipt. Apply the
 same handling when the measured checkout changes during the call. Do not release
