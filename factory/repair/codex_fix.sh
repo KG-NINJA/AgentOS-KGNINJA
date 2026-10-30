@@ -24,6 +24,8 @@ REQ_RESULTS="${REQ_ROOT}/results"
 REQ_LOGS="${REQ_ROOT}/logs"
 DAEMON_PID_FILE="${REQ_ROOT}/daemon.pid"
 
+python3 "$ROOT/factory/agent/codex_runtime.py" --role repair --inspect >/dev/null
+
 mkdir -p "$REPAIR_LOG_DIR" "$REQ_INCOMING" "$REQ_RESULTS" "$REQ_LOGS"
 
 if ! command -v codex >/dev/null 2>&1; then
@@ -62,6 +64,9 @@ if [ -x "$APP_SERVER_CONTROL" ] && [ -f "$APP_SERVER_CLIENT" ] && bash "$APP_SER
     echo "[codex_fix] app-server timeout fail_reason=codex-timeout" | tee -a "$REPAIR_LOG_FILE"
     exit 124
   fi
+  if [ "${FACTORY_CODEX_PROFILE:-legacy}" != "legacy" ]; then
+    exit "$app_rc"
+  fi
   echo "[codex_fix] app-server repair failed; fallback to direct exec" | tee -a "$REPAIR_LOG_FILE"
 fi
 
@@ -83,8 +88,11 @@ if [ "$daemon_alive" -eq 1 ]; then
   req_file="${REQ_INCOMING}/${request_id}.json"
   python3 - <<'PY' "$req_tmp" "$request_id" "${JOB_ID:-$request_id}" "${APP_ID:-}" "$TARGET_DIR" "$FAIL_LOG" "$ROOT"
 import json,sys
+sys.path.insert(0, str(__import__("pathlib").Path(sys.argv[-1]) / "factory/agent"))
+from codex_runtime import selection
 out,request_id,job_id,app_id,target_dir,validate_log,root = sys.argv[1:]
 payload = {
+  "runtime_selection": selection(),
   "request_id": request_id,
   "job_id": job_id,
   "app_id": app_id or None,
@@ -130,6 +138,9 @@ PY
     fi
     sleep 1
   done
+  if [ "${FACTORY_CODEX_PROFILE:-legacy}" != "legacy" ]; then
+    exit 124
+  fi
   echo "[codex_fix] daemon repair timeout; fallback to direct exec" | tee -a "$REPAIR_LOG_FILE"
 fi
 
@@ -138,7 +149,7 @@ fi
   echo "[codex_fix] failure_log=${FAIL_LOG:-none}"
 } | tee -a "$REPAIR_LOG_FILE"
 
-cat <<EOF | codex -a "$APPROVAL_POLICY" exec --sandbox "$SANDBOX_MODE" -C "$TARGET_DIR" - >>"$REPAIR_LOG_FILE" 2>&1
+cat <<EOF | python3 "$ROOT/factory/agent/codex_runtime.py" --role repair -- -a "$APPROVAL_POLICY" exec --sandbox "$SANDBOX_MODE" -C "$TARGET_DIR" - >>"$REPAIR_LOG_FILE" 2>&1
 You are a repair-only agent.
 
 Task:
