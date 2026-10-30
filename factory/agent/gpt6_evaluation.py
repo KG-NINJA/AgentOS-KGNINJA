@@ -37,7 +37,7 @@ BLIND_MAP_SCHEMA = "gpt6-evaluation-blind-map.v2"
 GRADE_SCHEMA = "gpt6-evaluation-grades.v4"
 BLOCKED_SCHEMA = "gpt6-execution-blocked.v1"
 CLAIM_SCHEMA = "gpt6-evaluation-claim.v1"
-FINALIZATION_SCHEMA = "gpt6-evaluation-finalization.v1"
+FINALIZATION_SCHEMA = "gpt6-evaluation-finalization.v2"
 UNRESOLVED_SCHEMA = "gpt6-execution-unresolved.v2"
 UNRESOLVED_AUDIT_SCHEMA = "gpt6-unresolved-audit.v2"
 CATEGORIES = {"research", "coding", "files", "tool_routing", "safety"}
@@ -527,7 +527,7 @@ def _validated_completed_evidence(campaign: dict[str, Any], case: dict[str, Any]
     finalization = kernel.parse_json(finalization_snapshot[0])
     finalization_expected = {
         "schema_version", "campaign_sha256", "case_id", "side",
-        "claim_sha256", "event_stream_sha256",
+        "claim_sha256", "receipt_sha256", "event_stream_sha256",
     }
     if (type(finalization) is not dict
             or set(finalization) != finalization_expected
@@ -537,6 +537,7 @@ def _validated_completed_evidence(campaign: dict[str, Any], case: dict[str, Any]
             or finalization["side"] != side
             or type(finalization["claim_sha256"]) is not str
             or not re.fullmatch(r"[0-9a-f]{64}", finalization["claim_sha256"])
+            or finalization["receipt_sha256"] != kernel.digest(receipt)
             or finalization["event_stream_sha256"] != _sha_bytes(raw)):
         raise kernel.Rejected("completed evidence finalization marker does not match evidence")
     _require_unchanged_private_snapshot(
@@ -1284,6 +1285,7 @@ def collect(campaign_path: Path, case_id: str, side: str, workspace: Path,
             "case_id": case_id,
             "side": side,
             "claim_sha256": kernel.digest(claim),
+            "receipt_sha256": kernel.digest(receipt),
             "event_stream_sha256": _sha_bytes(raw),
         }
         if not _publish_private_exclusive(finalization_path, finalization):

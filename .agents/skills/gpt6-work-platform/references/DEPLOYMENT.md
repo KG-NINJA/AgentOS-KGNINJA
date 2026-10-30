@@ -148,7 +148,9 @@ success stream and receipt have been written. If it changed during publication,
 leave the claim in place and reject the completed-looking files at mate preflight,
 blind grading and compilation; do not unlink the replacement or count the run.
 After the exact claim is released, atomically write a 0600 finalization marker
-bound to the campaign, case, side, original claim hash and raw event-stream hash.
+bound to the campaign, case, side, original claim hash, exact receipt hash and raw
+event-stream hash. Finalization schema v1 is historical evidence and cannot be
+silently promoted into the receipt-bound schema v2 contract.
 Every completed-evidence reader must require that marker, re-open its exact private
 snapshot after validation and reject a missing or mismatched marker. Thus a crash,
 claim deletion or publication failure between receipt creation and finalization

@@ -199,6 +199,11 @@ remains unresolved for explicit operator reconciliation.
 The original 0600 attempt-claim snapshot is also re-opened after all post-execution
 runtime and workspace checks. A changed claim, including a byte-identical inode
 replacement, prevents success promotion and retains the output as unresolved.
+After the exact claim is released, finalization schema v2 binds both the canonical
+receipt SHA-256 and raw JSONL SHA-256. This prevents valid-looking changes to
+non-JSONL metadata such as the CLI version, authentication surface, observation
+time or latency after collection. Finalization schema v1 remains historical and is
+not accepted for a new comparison campaign.
 Receipt schema v14 requires the mate observation timestamp to be no earlier than
 the campaign-selected first-side timestamp. Compilation uses that directed interval,
 not an absolute difference, so reversed observations cannot satisfy the maximum-gap

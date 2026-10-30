@@ -118,7 +118,9 @@ snapshot. If the claim changed during success publication, retain it and reject 
 apparently completed artifacts at every mate, grading and compilation boundary;
 never delete a replacement claim or treat those artifacts as resolved evidence.
 Only after that exact release, atomically publish a private finalization marker
-bound to the campaign, case, side, original claim hash and raw event-stream hash.
+bound to the campaign, case, side, original claim hash, exact receipt hash and raw
+event-stream hash. Finalization schema v1 remains historical evidence and must not
+be silently upgraded or counted under the stronger receipt binding.
 Mate preflight, blind grading and compilation must require the marker as well as
 the absence of a claim. A missing, replaced or mismatched marker means collection
 did not durably finish, even if a success stream and receipt are present.

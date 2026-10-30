@@ -99,6 +99,8 @@ print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_in
     def refresh_finalization(self, evidence: Path, stem: str):
         marker_path = evidence / (stem + ".finalized.json")
         marker = evaluation.kernel.load_json(marker_path)
+        marker["receipt_sha256"] = evaluation.kernel.digest(
+            evaluation.kernel.load_json(evidence / (stem + ".receipt.json")))
         marker["event_stream_sha256"] = evaluation._sha_bytes(
             (evidence / (stem + ".jsonl")).read_bytes())
         evaluation._write_private(marker_path, marker)
@@ -348,6 +350,9 @@ raise SystemExit(99)
         self.assertEqual(os.stat(finalization_path).st_mode & 0o777, 0o600)
         finalization = evaluation.kernel.load_json(finalization_path)
         self.assertEqual(finalization["schema_version"], evaluation.FINALIZATION_SCHEMA)
+        self.assertEqual(finalization["receipt_sha256"],
+                         evaluation.kernel.digest(
+                             evaluation.kernel.load_json(receipt_path)))
         self.assertEqual(finalization["event_stream_sha256"],
                          evaluation._sha_bytes(
                              (evidence / f"{self.candidate_case_id}.candidate.jsonl").read_bytes()))
@@ -935,6 +940,9 @@ raise SystemExit(99)
         # must invalidate the mate's proof of which first-side receipt authorized it.
         first["latency_ms"] += 1
         first_path.write_bytes(evaluation.kernel.canonical(first) + b"\n")
+        # Simulate a separately finalized replacement so this regression reaches
+        # the mate's predecessor binding rather than the marker's earlier guard.
+        self.refresh_finalization(evidence, f"{case_id}.baseline")
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "predecessor evidence"):
             evaluation._validated_completed_evidence(
@@ -989,6 +997,25 @@ raise SystemExit(99)
                     "completed evidence finalization marker changed during validation"):
                 evaluation._validated_completed_evidence(
                     self.campaign, case, "baseline", evidence)
+
+    def test_finalization_marker_binds_exact_receipt(self):
+        evidence = self.root / "finalization-receipt-binding"
+        case_id = self.baseline_case_id
+        evaluation.collect(self.campaign_path, case_id, "baseline", self.workspace,
+                           evidence, 10, str(self.fake))
+        case = evaluation._case(self.campaign, case_id)
+        receipt_path = evidence / f"{case_id}.baseline.receipt.json"
+        receipt = evaluation.kernel.load_json(receipt_path)
+        # Latency is valid receipt metadata but is not derived from the JSONL.
+        # The durable marker must prevent it from being rewritten after collection.
+        receipt["latency_ms"] += 1
+        evaluation._write_private(receipt_path, receipt)
+
+        with self.assertRaisesRegex(
+                evaluation.kernel.Rejected,
+                "completed evidence finalization marker does not match evidence"):
+            evaluation._validated_completed_evidence(
+                self.campaign, case, "baseline", evidence)
 
     def test_completed_evidence_symlinked_directory_is_rejected(self):
         evidence = self.root / "completed-evidence-real"
@@ -1448,6 +1475,8 @@ raise SystemExit(23)
                     receipt["latency_ms"] = 1.0
                     receipt_path.write_bytes(
                         evaluation.kernel.canonical(receipt) + b"\n")
+                    self.refresh_finalization(
+                        evidence, f"{case['id']}.{side}")
         manifest_path, mapping_path, grade_path, grades, manifest = prepare_grades(
             self.root, self.campaign_path, evidence)
         manifest_text = manifest_path.read_text()
@@ -1516,39 +1545,45 @@ raise SystemExit(23)
                         else "baseline")
         receipt_path = evidence / f"{receipt_case['id']}.{receipt_side}.receipt.json"
         receipt = json.loads(receipt_path.read_text())
+
+        def write_receipt():
+            evaluation._write_private(receipt_path, receipt)
+            self.refresh_finalization(
+                evidence, f"{receipt_case['id']}.{receipt_side}")
+
         receipt["auth_surface"] = "api_key"
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "authentication surface changed"):
             evaluation.compile_report(self.campaign_path, evidence, grade_path,
                                       manifest_path, mapping_path)
         receipt["auth_surface"] = "chatgpt"
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         receipt["codex_version"] = "codex-cli 0.152.0"
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "Codex CLI version is incompatible"):
             evaluation.compile_report(self.campaign_path, evidence, grade_path,
                                       manifest_path, mapping_path)
         receipt["codex_version"] = "codex-cli 9.9.8"
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "Codex CLI version changed"):
             evaluation.compile_report(self.campaign_path, evidence, grade_path,
                                       manifest_path, mapping_path)
         receipt["codex_version"] = "codex-cli 9.9.9"
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         receipt["timeout_seconds"] = 9
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "receipt does not match campaign"):
             evaluation.compile_report(self.campaign_path, evidence, grade_path,
                                       manifest_path, mapping_path)
         receipt["timeout_seconds"] = 10
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         original_observed_at = receipt["observed_at"]
         receipt["observed_at"] = "2099-01-01T00:00:00Z"
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         gap_manifest, gap_mapping, gap_grades_path, _, _ = prepare_grades(
             self.root, self.campaign_path, evidence, "-gap")
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
@@ -1556,34 +1591,34 @@ raise SystemExit(23)
             evaluation.compile_report(self.campaign_path, evidence, gap_grades_path,
                                       gap_manifest, gap_mapping)
         receipt["observed_at"] = original_observed_at
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         original_latency = receipt["latency_ms"]
         receipt["latency_ms"] = 0
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "invalid completion metrics"):
             evaluation.compile_report(self.campaign_path, evidence, grade_path,
                                       manifest_path, mapping_path)
         receipt["latency_ms"] = original_latency
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         # Binding is checked separately from fields that can be re-derived from JSONL.
         original_input_tokens = receipt["input_tokens"]
         receipt["input_tokens"] += 1
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "completion metrics do not match raw evidence"):
             evaluation.compile_report(self.campaign_path, evidence, grade_path,
                                       manifest_path, mapping_path)
         receipt["input_tokens"] = original_input_tokens
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         receipt["latency_ms"] += 1
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         with self.assertRaisesRegex(evaluation.kernel.Rejected,
                                     "blind manifest or mapping does not match evidence"):
             evaluation.compile_report(self.campaign_path, evidence, grade_path,
                                       manifest_path, mapping_path)
         receipt["latency_ms"] -= 1
-        receipt_path.write_text(json.dumps(receipt))
+        write_receipt()
         grades.pop()
         grade_doc = evaluation.kernel.load_json(grade_path)
         grade_doc["grades"] = grades
